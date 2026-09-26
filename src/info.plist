@@ -5,48 +5,488 @@
 	<key>bundleid</key>
 	<string>io.github.x-o-r-r-o.media-toolkit</string>
 	<key>category</key>
-	<string>Productivity</string>
+	<string>Tools</string>
 	<key>connections</key>
-	<dict/>
+	<dict>
+		<key>0BD06EC4-881F-556B-B29A-73E2DB165C12</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>A09D17E5-E183-5275-9AF6-F3053ABB9007</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>0DAD532E-F840-54F1-BD9B-077649F45378</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+				<key>modifiers</key>
+				<integer>1048576</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>45253CC5-B3B4-54EC-958D-76A20BA62137</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>907248FA-AA45-5246-99D0-93DA151832DC</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>5AF8CA0D-E873-5BAB-B9E0-C8D45DC7FA66</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+				<key>modifiers</key>
+				<integer>1048576</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>907248FA-AA45-5246-99D0-93DA151832DC</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>A337F065-01D9-54FE-BC94-41281A478F86</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>A337F065-01D9-54FE-BC94-41281A478F86</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+				<key>modifiers</key>
+				<integer>1048576</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>E6F8C765-B081-5366-8914-92FF0BC2E716</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>A09D17E5-E183-5275-9AF6-F3053ABB9007</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+	</dict>
 	<key>createdby</key>
 	<string>x-o-r-r-o</string>
 	<key>description</key>
-	<string>Resize, convert, rotate, compress images and video; remove image backgrounds offline.</string>
+	<string>Resize, convert, rotate and clean images, remove backgrounds offline, and convert, compress or trim video and audio</string>
+	<key>disabled</key>
+	<false/>
 	<key>name</key>
 	<string>Media Toolkit</string>
 	<key>objects</key>
-	<array/>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<false/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>keyword</key>
+				<string>{var:keyword_img}</string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string>Reading the Finder selection…</string>
+				<key>script</key>
+				<string>osascript -l JavaScript ./media.js img "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>skipuniversalaction</key>
+				<true/>
+				<key>subtext</key>
+				<string>Resize, convert, rotate, clean or remove the background of the Finder selection</string>
+				<key>title</key>
+				<string>Edit Images</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>0DAD532E-F840-54F1-BD9B-077649F45378</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<false/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>keyword</key>
+				<string>{var:keyword_vid}</string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string>Reading the Finder selection…</string>
+				<key>script</key>
+				<string>osascript -l JavaScript ./media.js vid "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>skipuniversalaction</key>
+				<true/>
+				<key>subtext</key>
+				<string>MP4, WebM, GIF, MP3, compress, resize, trim the Finder selection</string>
+				<key>title</key>
+				<string>Convert Video and Audio</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>5AF8CA0D-E873-5BAB-B9E0-C8D45DC7FA66</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>acceptsfiles</key>
+				<true/>
+				<key>acceptsmulti</key>
+				<integer>1</integer>
+				<key>acceptstext</key>
+				<false/>
+				<key>acceptsurls</key>
+				<false/>
+				<key>name</key>
+				<string>Media Toolkit</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.universalaction</string>
+			<key>uid</key>
+			<string>45253CC5-B3B4-54EC-958D-76A20BA62137</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>argument</key>
+				<string></string>
+				<key>passthroughargument</key>
+				<false/>
+				<key>variables</key>
+				<dict>
+					<key>mt_ua_files</key>
+					<string>{query}</string>
+				</dict>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.utility.argument</string>
+			<key>uid</key>
+			<string>907248FA-AA45-5246-99D0-93DA151832DC</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<false/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>keyword</key>
+				<string>{var:keyword_media}</string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string>Reading the files…</string>
+				<key>script</key>
+				<string>osascript -l JavaScript ./media.js all "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>skipuniversalaction</key>
+				<true/>
+				<key>subtext</key>
+				<string>Image, video and audio operations for the Finder selection</string>
+				<key>title</key>
+				<string>Media Toolkit</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>A337F065-01D9-54FE-BC94-41281A478F86</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>concurrently</key>
+				<false/>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>script</key>
+				<string>./action.sh "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>type</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.script</string>
+			<key>uid</key>
+			<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>lastpathcomponent</key>
+				<false/>
+				<key>onlyshowifquerypopulated</key>
+				<true/>
+				<key>removeextension</key>
+				<false/>
+				<key>text</key>
+				<string>{query}</string>
+				<key>title</key>
+				<string>{var:alfred_workflow_name}</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.output.notification</string>
+			<key>uid</key>
+			<string>A09D17E5-E183-5275-9AF6-F3053ABB9007</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>availableviaurlhandler</key>
+				<false/>
+				<key>triggerid</key>
+				<string>notify</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.external</string>
+			<key>uid</key>
+			<string>0BD06EC4-881F-556B-B29A-73E2DB165C12</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+	</array>
 	<key>readme</key>
-	<string># Media Toolkit
+	<string>## Usage
 
-Resize, convert, rotate, compress images and video; remove image backgrounds offline.
+Edit the images selected in Finder via the `img` keyword. Type what you want after the keyword:
 
-&gt; **Status:** planned — not yet functional. See [PLAN.md](PLAN.md).
+* `50%` resizes by a percentage; `1200px` fits the longest side, or picks the width or height; `w800`, `h600` and `800x600` set a width, a height or a box to fit in.
+* `png`, `jpg`, `heic`, `tiff`, `gif`, `bmp`, `avif` or `webp` converts. Only the formats this Mac can write are offered.
+* `rotate 90`, `rotate -90`, `rotate 180` and `flip` turn or mirror the image.
+* `strip` removes EXIF, GPS, camera and XMP metadata without re-compressing, and keeps the photo upright. `location` removes only the GPS data.
+* `optimize` re-encodes at the quality set in the Workflow’s Configuration and keeps the result only if it is smaller.
+* `background` removes the background on-device with Apple’s Vision framework (macOS 14 or later) and saves a transparent PNG, optionally cropped to the subject.
 
-## Usage
+* &lt;kbd&gt;↩&lt;/kbd&gt; Run the operation.
+* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Run the operation, then reveal the results in Finder.
+* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;L&lt;/kbd&gt; Show the selected file names.
 
-Resize, convert, rotate, compress images and video; remove image backgrounds offline via the `img` keyword.
+Results are saved next to the originals with the suffix from the Workflow’s Configuration (`-edited` by default), or replace the originals if you turn that on there. Existing files are never overwritten: a number is added instead. Photos are resized and converted the way they are displayed, so EXIF rotation is respected, animated GIFs keep their frames, and transparency becomes white only in formats without an alpha channel. When a folder is read-only, results go to Downloads.
 
-![Media Toolkit results in Alfred](images/img.png)
+Convert the video and audio files selected in Finder via the `vid` keyword: MP4 (H.264 or HEVC, with the hardware encoder), WebM, MOV and GIF; extract or convert audio to MP3, M4A, WAV, FLAC or AIFF; compress; resize to 1080p, 720p or 480p; remove the audio track; or trim with `trim 0:10-0:25` (`trim 90-` keeps everything after 1:30).
 
-* &lt;kbd&gt;↩&lt;/kbd&gt; Primary action.
-* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Secondary action.
-* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;Y&lt;/kbd&gt; Quick Look.
+Conversions run in the background, one file at a time, with a notification when they finish. While they run, the `vid` keyword shows the progress: &lt;kbd&gt;↩&lt;/kbd&gt; cancels, &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; reveals the log.
 
-Every keyword can be changed in the Workflow’s Configuration.
+Without ffmpeg, MP4, HEVC, MOV, resizing, trimming and M4A work on QuickTime and MP4 files through macOS’s own `avconvert`, and audio converts to M4A, WAV, FLAC or AIFF through `afconvert`. The other formats offer to copy `brew install ffmpeg`.
 
-## Development
+Alternatively, act on any files via the Universal Action, or on the Finder selection via the `media` keyword: both show the image, video and audio operations that apply, and each operation only touches the files of its kind.
 
-```bash
-./build.sh   # -&gt; dist/alfred-media-toolkit-&lt;version&gt;.alfredworkflow
-```
-
-## AI disclosure
-
-This workflow is developed with the help of Claude (Anthropic), an AI assistant. All code is reviewed and tested by the author.
+Every keyword, the output suffix, the image quality and the GIF size and frame rate can be changed in the Workflow’s Configuration.
 </string>
 	<key>uidata</key>
-	<dict/>
+	<dict>
+		<key>0BD06EC4-881F-556B-B29A-73E2DB165C12</key>
+		<dict>
+			<key>note</key>
+			<string>Called by worker.sh when a background conversion finishes</string>
+			<key>xpos</key>
+			<integer>30</integer>
+			<key>ypos</key>
+			<integer>410</integer>
+		</dict>
+		<key>0DAD532E-F840-54F1-BD9B-077649F45378</key>
+		<dict>
+			<key>xpos</key>
+			<integer>30</integer>
+			<key>ypos</key>
+			<integer>20</integer>
+		</dict>
+		<key>45253CC5-B3B4-54EC-958D-76A20BA62137</key>
+		<dict>
+			<key>xpos</key>
+			<integer>30</integer>
+			<key>ypos</key>
+			<integer>280</integer>
+		</dict>
+		<key>5AF8CA0D-E873-5BAB-B9E0-C8D45DC7FA66</key>
+		<dict>
+			<key>xpos</key>
+			<integer>30</integer>
+			<key>ypos</key>
+			<integer>150</integer>
+		</dict>
+		<key>907248FA-AA45-5246-99D0-93DA151832DC</key>
+		<dict>
+			<key>note</key>
+			<string>Hands the selected files to the Script Filter as a variable</string>
+			<key>xpos</key>
+			<integer>250</integer>
+			<key>ypos</key>
+			<integer>20</integer>
+		</dict>
+		<key>A09D17E5-E183-5275-9AF6-F3053ABB9007</key>
+		<dict>
+			<key>xpos</key>
+			<integer>910</integer>
+			<key>ypos</key>
+			<integer>20</integer>
+		</dict>
+		<key>A337F065-01D9-54FE-BC94-41281A478F86</key>
+		<dict>
+			<key>xpos</key>
+			<integer>470</integer>
+			<key>ypos</key>
+			<integer>20</integer>
+		</dict>
+		<key>E6F8C765-B081-5366-8914-92FF0BC2E716</key>
+		<dict>
+			<key>note</key>
+			<string>Images run now; video and audio are queued for worker.sh</string>
+			<key>xpos</key>
+			<integer>690</integer>
+			<key>ypos</key>
+			<integer>20</integer>
+		</dict>
+	</dict>
 	<key>userconfigurationconfig</key>
 	<array>
 		<dict>
@@ -62,9 +502,9 @@ This workflow is developed with the help of Claude (Anthropic), an AI assistant.
 				<true/>
 			</dict>
 			<key>description</key>
-			<string></string>
+			<string>Images selected in Finder</string>
 			<key>label</key>
-			<string>Img keyword</string>
+			<string>Keywords</string>
 			<key>type</key>
 			<string>textfield</string>
 			<key>variable</key>
@@ -83,7 +523,7 @@ This workflow is developed with the help of Claude (Anthropic), an AI assistant.
 				<true/>
 			</dict>
 			<key>description</key>
-			<string></string>
+			<string>Video and audio selected in Finder</string>
 			<key>label</key>
 			<string></string>
 			<key>type</key>
@@ -91,9 +531,233 @@ This workflow is developed with the help of Claude (Anthropic), an AI assistant.
 			<key>variable</key>
 			<string>keyword_vid</string>
 		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>media</string>
+				<key>placeholder</key>
+				<string>media</string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Everything for the Finder selection</string>
+			<key>label</key>
+			<string></string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>keyword_media</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>-edited</string>
+				<key>placeholder</key>
+				<string>-edited</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<false/>
+			</dict>
+			<key>description</key>
+			<string>Added to the file name when the format stays the same. Existing files are never overwritten: a number is added instead.</string>
+			<key>label</key>
+			<string>Output</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>output_suffix</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<false/>
+				<key>required</key>
+				<false/>
+				<key>text</key>
+				<string>Replace the original files</string>
+			</dict>
+			<key>description</key>
+			<string>Only when the format stays the same and the file is writable.</string>
+			<key>label</key>
+			<string></string>
+			<key>type</key>
+			<string>checkbox</string>
+			<key>variable</key>
+			<string>replace_originals</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>85</string>
+				<key>pairs</key>
+				<array>
+					<array>
+						<string>100%</string>
+						<string>100</string>
+					</array>
+					<array>
+						<string>95%</string>
+						<string>95</string>
+					</array>
+					<array>
+						<string>90%</string>
+						<string>90</string>
+					</array>
+					<array>
+						<string>85%</string>
+						<string>85</string>
+					</array>
+					<array>
+						<string>80%</string>
+						<string>80</string>
+					</array>
+					<array>
+						<string>75%</string>
+						<string>75</string>
+					</array>
+					<array>
+						<string>70%</string>
+						<string>70</string>
+					</array>
+					<array>
+						<string>60%</string>
+						<string>60</string>
+					</array>
+					<array>
+						<string>50%</string>
+						<string>50</string>
+					</array>
+				</array>
+			</dict>
+			<key>description</key>
+			<string>JPEG, HEIC, AVIF and WebP</string>
+			<key>label</key>
+			<string>Quality</string>
+			<key>type</key>
+			<string>popupbutton</string>
+			<key>variable</key>
+			<string>image_quality</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>480</string>
+				<key>pairs</key>
+				<array>
+					<array>
+						<string>320 px</string>
+						<string>320</string>
+					</array>
+					<array>
+						<string>480 px</string>
+						<string>480</string>
+					</array>
+					<array>
+						<string>640 px</string>
+						<string>640</string>
+					</array>
+					<array>
+						<string>800 px</string>
+						<string>800</string>
+					</array>
+					<array>
+						<string>1080 px</string>
+						<string>1080</string>
+					</array>
+					<array>
+						<string>Original size</string>
+						<string>0</string>
+					</array>
+				</array>
+			</dict>
+			<key>description</key>
+			<string>Maximum width</string>
+			<key>label</key>
+			<string>GIF from video</string>
+			<key>type</key>
+			<string>popupbutton</string>
+			<key>variable</key>
+			<string>gif_width</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>15</string>
+				<key>pairs</key>
+				<array>
+					<array>
+						<string>10 fps</string>
+						<string>10</string>
+					</array>
+					<array>
+						<string>12 fps</string>
+						<string>12</string>
+					</array>
+					<array>
+						<string>15 fps</string>
+						<string>15</string>
+					</array>
+					<array>
+						<string>20 fps</string>
+						<string>20</string>
+					</array>
+					<array>
+						<string>24 fps</string>
+						<string>24</string>
+					</array>
+					<array>
+						<string>30 fps</string>
+						<string>30</string>
+					</array>
+				</array>
+			</dict>
+			<key>description</key>
+			<string>Frame rate</string>
+			<key>label</key>
+			<string></string>
+			<key>type</key>
+			<string>popupbutton</string>
+			<key>variable</key>
+			<string>gif_fps</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>placeholder</key>
+				<string>/path/to/ffmpeg</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Optional. Found automatically in /opt/homebrew/bin, /usr/local/bin or the PATH.</string>
+			<key>label</key>
+			<string>ffmpeg</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>ffmpeg_path</string>
+		</dict>
 	</array>
+	<key>variables</key>
+	<dict/>
+	<key>variablesdontexport</key>
+	<array/>
 	<key>version</key>
-	<string>0.1.0</string>
+	<string>1.0.0</string>
 	<key>webaddress</key>
 	<string>https://github.com/x-o-r-r-o/alfred-media-toolkit</string>
 </dict>

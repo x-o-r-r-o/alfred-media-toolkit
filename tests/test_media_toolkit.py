@@ -1197,6 +1197,7 @@ class AuditQueueTests(QueueTests):
         with open(tmp, "w") as f:
             f.write("partial")
         orphan = subprocess.Popen(["/usr/bin/tail", "-f", tmp], stdout=subprocess.DEVNULL)
+        self.addCleanup(orphan.wait)
         self.addCleanup(orphan.kill)
         lock = os.path.join(CACHE, "worker.lock")
         os.makedirs(lock)
@@ -1209,6 +1210,7 @@ class AuditQueueTests(QueueTests):
         self.assertFalse(os.path.exists(lock))
         # a live process that isn't our conversion (reused pid) is left alone
         other = subprocess.Popen(["/bin/sleep", "30"])
+        self.addCleanup(other.wait)
         self.addCleanup(other.kill)
         os.makedirs(lock)
         for name, value in (("pid", "999999"), ("child", str(other.pid)), ("tmp", tmp)):
@@ -1239,6 +1241,58 @@ class AuditQueueTests(QueueTests):
         finally:
             shutil.rmtree(lock, ignore_errors=True)
             os.remove(os.path.join(CACHE, "progress.txt"))
+
+
+class AuditEncoderTests(Base):
+    def test_missing_encoders(self):
+        # a minimal ffmpeg build (no libvpx, x264 or LAME) failed every such conversion with "Unknown encoder"
+        mov, wav = self.p("clip.mov"), write_wav(self.p("t.wav"))
+        open(mov, "w").close()
+        env = dict(MT_TEST_FFMPEG="/opt/fake/ffmpeg", MT_TEST_FFMPEG_ENCODERS="h264_videotoolbox,hevc_videotoolbox,aac,flac,pcm_s16le,pcm_s16be")
+        it = items("vid", "", [mov], **env)
+        args = [i.get("arg") for i in it]
+        for a in ("mp4", "hevc", "m4a", "flac"):
+            self.assertIn(a, args)
+        for a in ("webm", "compress:28", "mp3"):
+            self.assertNotIn(a, args)
+        titles = [i["title"] for i in it]
+        self.assertIn("Convert to WebM (VP9): this ffmpeg can't encode it", titles)
+        self.assertIn("libvpx-vp9 or libopus", next(i for i in it if "WebM" in i["title"])["subtitle"])
+        self.assertNotIn("Install ffmpeg with Homebrew", titles)
+        # the macOS tools step in where they can: a movie to M4A via ffmpeg, MP3 isn't possible
+        msg, = [QueueTests.job(self, "mp3", [mov], **env)[0]]
+        self.assertEqual(msg, "Nothing queued: clip.mov: this ffmpeg has no libmp3lame encoder")
+        # trimming an MP3 needs LAME too: avconvert does it instead (as M4A)
+        mp3 = self.p("song.mp3")
+        open(mp3, "w").close()
+        _, jobs = QueueTests.job(self, "trim:0_01-0_02", [mp3], **env)
+        self.assertEqual((jobs[0][9], jobs[0][5]), ("avconvert", self.p("song-edited.m4a")))
+
+    def test_encoder_list_is_read_and_cached(self):
+        fake = os.path.join(self.dir, "ffmpeg")
+        count = os.path.join(self.dir, "runs")
+        with open(fake, "w") as f:
+            f.write(f"""#!/bin/sh
+echo run >> '{count}'
+cat <<'EOF'
+Encoders:
+ V..... = Video
+ ------
+ V....D h264_videotoolbox    VideoToolbox H.264 Encoder
+ V....D hevc_videotoolbox    VideoToolbox H.265 Encoder
+ A....D aac                  AAC (Advanced Audio Coding)
+EOF
+""")
+        os.chmod(fake, 0o755)
+        mov = self.p("clip.mov")
+        open(mov, "w").close()
+        for _ in range(2):
+            args = [i.get("arg") for i in items("vid", "", [mov], ffmpeg_path=fake)]
+            self.assertIn("mp4", args)
+            self.assertNotIn("webm", args)
+        with open(count) as f:
+            self.assertEqual(len(f.read().split()), 1)  # asked once, then cached
+        os.remove(os.path.join(CACHE, "ffmpeg-encoders.txt"))
 
 
 class AuditMiscTests(Base):

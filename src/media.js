@@ -104,7 +104,7 @@ function plannedOutput(src, ext, opts = {}) {
   } else if (same && replaceOriginals() && !opts.neverReplace && FM.isWritableFileAtPath(src)) {
     return { path: src, replace: true, note: "" };
   }
-  const stem = stemOf(src) + (same || dir !== dirOf(src) ? suffix() : "");
+  const stem = stemOf(src) + (same || opts.alwaysSuffix || dir !== dirOf(src) ? suffix() : "");
   return { path: uniquePath(dir, stem, outExt), replace: false, note };
 }
 function normExt(e) {
@@ -853,7 +853,10 @@ function which(name) {
   const dirs = [];
   if (custom && name === "ffmpeg" && !isDir(custom) && FM.isExecutableFileAtPath(custom)) return custom;
   if (custom) dirs.push(isDir(custom) ? custom : dirOf(custom));
-  dirs.push("/opt/homebrew/bin", "/usr/local/bin", ...env("PATH", "").split(":").filter(Boolean));
+  // Homebrew (Apple Silicon, Intel), MacPorts, Nix; Alfred's own PATH doesn't include them
+  const home = $.NSHomeDirectory().js;
+  dirs.push("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", `${home}/.nix-profile/bin`, "/run/current-system/sw/bin", "/nix/var/nix/profiles/default/bin",
+    ...env("PATH", "").split(":").filter(Boolean));
   for (const d of dirs) {
     const p = `${d}/${name}`;
     if (FM.isExecutableFileAtPath(p) && !isDir(p)) return p;
@@ -958,8 +961,70 @@ function fmtTime(t) {
 
 // The tool that will run `op` for a file of `kind`/`ext`, or null.
 // Without ffmpeg: avconvert (AVFoundation) for MP4/MOV/M4V video, afconvert (Core Audio) for audio.
+// The encoders ffmpeg needs for an operation on a file of `kind`/`ext`
+function encodersFor(opId, kind, ext) {
+  const base = opId.split(":")[0];
+  if (base === "trim") {
+    if (kind === "video") return ["h264_videotoolbox"];
+    return ext === "mp3" ? ["libmp3lame"] : [];
+  }
+  return { mp4: ["h264_videotoolbox"], mov: ["h264_videotoolbox"], scale: ["h264_videotoolbox"], hevc: ["hevc_videotoolbox"],
+    webm: ["libvpx-vp9", "libopus"], compress: ["libx264"], mp3: ["libmp3lame"] }[base] || [];
+}
+
+// The encoders of this ffmpeg build (null when unknown). Builds differ: a minimal or LGPL ffmpeg has no
+// libx264, libvpx or LAME, and the conversion would fail with "Unknown encoder". Cached per binary.
+let encoderCache;
+function ffmpegEncoders(ffmpeg) {
+  if (encoderCache !== undefined) return encoderCache;
+  const t = env("MT_TEST_FFMPEG_ENCODERS", "");
+  if (t) return (encoderCache = t.split(","));
+  encoderCache = null;
+  const real = $(ffmpeg).stringByResolvingSymlinksInPath.js;
+  const a = FM.attributesOfItemAtPathError(real, $());
+  if (a.isNil()) return null;
+  const stamp = `${real}\n${a.fileModificationDate.timeIntervalSince1970}\n${Number(a.fileSize)}`;
+  const cachePath = `${cacheDir()}/ffmpeg-encoders.txt`;
+  const cached = readText(cachePath);
+  if (cached && cached.startsWith(stamp + "\n")) return (encoderCache = cached.slice(stamp.length + 1).split(" ").filter(Boolean));
+  // ffmpeg -encoders into a file, with a 5 s limit so that a broken binary can't hang the Script Filter
+  const out = `${cacheDir()}/.encoders-${$.NSProcessInfo.processInfo.processIdentifier}.txt`;
+  FM.createFileAtPathContentsAttributes(out, $(), $());
+  const fh = $.NSFileHandle.fileHandleForWritingAtPath(out);
+  const task = $.NSTask.alloc.init;
+  task.executableURL = $.NSURL.fileURLWithPath(ffmpeg);
+  task.arguments = $(["-hide_banner", "-nostdin", "-encoders"]);
+  task.standardOutput = fh;
+  task.standardError = $.NSFileHandle.fileHandleWithNullDevice;
+  task.standardInput = $.NSFileHandle.fileHandleWithNullDevice;
+  if (task.launchAndReturnError($())) {
+    const end = Date.now() + 5000;
+    while (task.isRunning && Date.now() < end) $.NSThread.sleepForTimeInterval(0.02);
+    if (task.isRunning) task.terminate;
+    else {
+      const text = readText(out) || "";
+      const list = [...text.matchAll(/^ [VAS][A-Z.]{5} (\S+)/gm)].map((m) => m[1]);
+      if (list.length) {
+        encoderCache = list;
+        $(`${stamp}\n${list.join(" ")}`).writeToFileAtomicallyEncodingError(cachePath, true, $.NSUTF8StringEncoding, $());
+      }
+    }
+  }
+  if (!fh.isNil()) fh.closeFile;
+  FM.removeItemAtPathError(out, $());
+  return encoderCache;
+}
+
+// Encoders this op needs that the installed ffmpeg lacks ([] when all there, or when that can't be told)
+function missingEncoders(opId, kind, ext, ffmpeg) {
+  const need = encodersFor(opId, kind, ext);
+  if (!ffmpeg || !need.length) return [];
+  const have = ffmpegEncoders(ffmpeg);
+  return have ? need.filter((e) => !have.includes(e)) : [];
+}
+
 function toolFor(opId, kind, ext, ffmpeg) {
-  if (ffmpeg) return "ffmpeg";
+  if (ffmpeg && !missingEncoders(opId, kind, ext, ffmpeg).length) return "ffmpeg";
   const base = opId.split(":")[0];
   if (kind === "video" && AVF_VIDEO_EXT.includes(ext) && ["mp4", "hevc", "mov", "scale", "m4a", "trim"].includes(base)) return "avconvert";
   if (kind === "audio" && CA_AUDIO_EXT.includes(ext)) {
@@ -1115,11 +1180,13 @@ function enqueue(opId) {
     }
     const tool = toolFor(opId, kind, extOf(f), ffmpeg);
     if (!tool) {
-      failed.push(`${baseName(f)}: needs ffmpeg`);
+      const lacks = missingEncoders(opId, kind, extOf(f), ffmpeg);
+      failed.push(`${baseName(f)}: ${lacks.length ? `this ffmpeg has no ${lacks.join(" or ")} encoder` : "needs ffmpeg"}`);
       continue;
     }
     const ext = outputExtFor(opId, f, kind, tool);
-    const plan = plannedOutput(f, ext, { neverReplace: base === "trim" });
+    // a trimmed clip always gets the suffix, even in another format: "song.m4a" would look like the whole song
+    const plan = plannedOutput(f, ext, { neverReplace: base === "trim", alwaysSuffix: base === "trim" });
     if (!plan.replace && taken.includes(plan.path)) plan.path = uniquePath(dirOf(plan.path), stemOf(plan.path), extOf(plan.path), taken);
     taken.push(plan.path);
     const tmp = tempPathFor(plan.path);
@@ -1412,7 +1479,11 @@ function avItems(files, query) {
     if (!m[1].trim()) return items.concat([info("Trim: type start-end", "e.g. trim 0:10-0:25, trim 90-120 or trim 1:00- (to the end)", "trim", { autocomplete: "trim " })]);
     if (!r) return items.concat([info("Invalid range", "Use start-end with seconds or [h:]mm:ss, e.g. trim 0:10-0:25", "error", { autocomplete: "trim " })]);
     const usable = targets.filter((f) => toolFor("trim", kindOf(f), extOf(f), ffmpeg));
-    if (!usable.length) return items.concat([installItem("Trimming these files needs ffmpeg")]);
+    if (!usable.length) {
+      return items.concat([ffmpeg
+        ? info("Trim: this ffmpeg can't encode it", `It has no ${missingEncoders("trim", kindOf(targets[0]), extOf(targets[0]), ffmpeg).join(" or ")} encoder · reinstall ffmpeg, or pick another build in the Workflow’s Configuration`, "error")
+        : installItem("Trimming these files needs ffmpeg")]);
+    }
     const id = `trim:${fmtTime(r.start).replace(/:/g, "_")}-${r.end === null ? "" : fmtTime(r.end).replace(/:/g, "_")}`;
     return items.concat([opItem(`Trim ${usable.length === 1 ? baseName(usable[0]) : plural(usable.length, "file")} from ${fmtTime(r.start)} to ${r.end === null ? "the end" : fmtTime(r.end)}`,
       "Frame-accurate, re-encoded", id, usable, "trim")]);
@@ -1440,6 +1511,8 @@ function avItems(files, query) {
     if (q && !matchWords(q, words)) continue;
     if (!usable.length) {
       missing.push(op.title);
+      const lacks = ffmpeg ? missingEncoders(op.id, kindOf(targets[0]), extOf(targets[0]), ffmpeg) : [];
+      if (lacks.length) items.push(info(`${title}: this ffmpeg can't encode it`, `It has no ${lacks.join(" or ")} encoder · reinstall ffmpeg, or pick another build in the Workflow’s Configuration`, "error"));
       continue;
     }
     const count = usable.length === 1 ? "" : ` (${usable.length} files)`;

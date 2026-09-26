@@ -22,7 +22,7 @@ Edit the images selected in Finder via the `img` keyword. Type what you want aft
 
 A selected folder stands for the images, videos and audio files directly inside it.
 
-Results are saved next to the originals with the suffix from the Workflow’s Configuration (`-edited` by default), or replace the originals if you turn that on there. Existing files are never overwritten: a number is added instead. Photos are resized and converted the way they are displayed, so EXIF rotation is respected, animated GIFs keep their frames, and transparency becomes white only in formats without an alpha channel. When a folder is read-only, results go to Downloads.
+Results are saved next to the originals with the suffix from the Workflow’s Configuration (`-edited` by default), or replace the originals if you turn that on there. Existing files are never overwritten: a number is added instead. Photos are resized and converted the way they are displayed, so EXIF rotation is respected, animated GIFs keep their frames, and transparency becomes white only in formats without an alpha channel. Colour profiles (such as Display P3), 16-bit depth and the pages of multi-page TIFFs are kept; the HDR gain map of iPhone photos is not, so edited photos are standard dynamic range. When a folder is read-only, results go to Downloads.
 
 Convert the video and audio files selected in Finder via the `vid` keyword: MP4 (H.264 or HEVC, with the hardware encoder), WebM, MOV and GIF; extract or convert audio to MP3, M4A, WAV, FLAC or AIFF; compress; resize to 1080p, 720p or 480p; remove the audio track; or trim with `trim 0:10-0:25` (`trim 90-` keeps everything after 1:30).
 
@@ -30,7 +30,9 @@ Convert the video and audio files selected in Finder via the `vid` keyword: MP4 
 
 Conversions run in the background, one file at a time, with a notification when they finish. While they run, the `vid` keyword shows the progress: <kbd>↩</kbd> cancels, <kbd>⌘</kbd><kbd>↩</kbd> reveals the log.
 
-Without ffmpeg, MP4, HEVC, MOV, resizing, trimming and M4A work on QuickTime and MP4 files through macOS’s own `avconvert`, and audio converts to M4A, WAV, FLAC or AIFF through `afconvert`. The other formats offer to copy `brew install ffmpeg`.
+HEVC keeps HDR video in 10 bits. The other formats are 8-bit without tone mapping, so HDR clips can look washed out in some players.
+
+Without ffmpeg, MP4, HEVC, MOV, resizing, trimming and M4A work on QuickTime and MP4 files through macOS’s own `avconvert`, and audio converts to M4A, WAV, FLAC or AIFF through `afconvert`. The other formats offer to copy `brew install ffmpeg`. ffmpeg is found in Homebrew, MacPorts and Nix locations, or set its path in the Workflow’s Configuration; formats its build can't encode are pointed out.
 
 Alternatively, act on any files via the Universal Action, or on the Finder selection via the `media` keyword: both show the image, video and audio operations that apply, and each operation only touches the files of its kind.
 

@@ -259,7 +259,9 @@ function orientedFrame(info, i, maxSide) {
     if (!img) throw new Error("could not decode the image");
     return img;
   }
-  if (target * target > MAX_PIXELS * 2) throw new Error("image too large");
+  const scale = target / full;
+  const area = info.width * info.height * scale * scale;
+  if (area > MAX_PIXELS) throw new Error(`image too large (${Math.round(area / 1e6)} MP)`);
   const img = $.CGImageSourceCreateThumbnailAtIndex(info.src, i, dict({
     kCGImageSourceCreateThumbnailFromImageAlways: true,
     kCGImageSourceCreateThumbnailWithTransform: true,
@@ -343,6 +345,11 @@ function carriedProps(info, i, fmt, stripAll) {
   return d;
 }
 
+function loopCount(info) {
+  const fp = cfToJS($.CGImageSourceCopyProperties(info.src, null)) || {};
+  return (fp["{GIF}"] && fp["{GIF}"].LoopCount) || 0;
+}
+
 function gifFrameProps(info, i) {
   const p = cfToJS($.CGImageSourceCopyPropertiesAtIndex(info.src, i, null)) || {};
   const g = p["{GIF}"] || p["{PNG}"] || p["{HEICS}"] || p["{WebP}"] || {};
@@ -422,10 +429,7 @@ function processImage(path, op) {
       // Re-encode straight from the source: keeps metadata, orientation, colour profile and depth
       const dest = $.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(tmp), $(fmt.uti), frameCount, null);
       if (!dest) throw new Error(`can't write ${fmt.name}`);
-      if (keepAnim) {
-        const fp = cfToJS($.CGImageSourceCopyProperties(info.src, null)) || {};
-        if (fp["{GIF}"]) $.CGImageDestinationSetProperties(dest, dict({ "{GIF}": plain({ LoopCount: fp["{GIF}"].LoopCount || 0 }) }));
-      }
+      if (keepAnim) $.CGImageDestinationSetProperties(dest, dict({ "{GIF}": plain({ LoopCount: loopCount(info) }) }));
       for (let i = 0; i < frameCount; i++) {
         if (kind === "optimize") {
           // ImageIO copies JPEG data untouched when the format doesn't change, so decode and encode again,
@@ -483,10 +487,7 @@ function processImage(path, op) {
         frames.push({ img, props });
       }
       let fileProps = null;
-      if (keepAnim) {
-        const fp = cfToJS($.CGImageSourceCopyProperties(info.src, null)) || {};
-        fileProps = dict({ "{GIF}": plain({ LoopCount: (fp["{GIF}"] && fp["{GIF}"].LoopCount) || 0 }) });
-      }
+      if (keepAnim) fileProps = dict({ "{GIF}": plain({ LoopCount: loopCount(info) }) });
       writeFrames(tmp, fmtKey, frames, fileProps);
       detail = `${imgW(frames[0].img)}×${imgH(frames[0].img)}`;
     }
@@ -513,6 +514,8 @@ function stripMetadata(info, srcFmt, gpsOnly) {
   const fmtKey = srcFmt && encodableFormats().includes(srcFmt) ? srcFmt : info.hasAlpha ? "png" : "jpeg";
   const fmt = FORMATS[fmtKey];
   const plan = plannedOutput(info.path, fmt.ext);
+  const notes = [plan.note];
+  if (fmtKey !== srcFmt) notes.push(`saved as ${fmt.name}`);
   const tmp = tempPathFor(plan.path);
   let ok = false;
   try {
@@ -545,14 +548,14 @@ function stripMetadata(info, srcFmt, gpsOnly) {
         if (n > 1) props = dict({ "{GIF}": gifFrameProps(info, i) });
         frames.push({ img, props });
       }
-      writeFrames(tmp, fmtKey, frames, n > 1 ? dict({ "{GIF}": plain({ LoopCount: 0 }) }) : null);
+      writeFrames(tmp, fmtKey, frames, n > 1 ? dict({ "{GIF}": plain({ LoopCount: loopCount(info) }) }) : null);
     }
   } catch (e) {
     FM.removeItemAtPathError(tmp, $());
     throw e;
   }
   const out = commit(tmp, plan);
-  return { out, detail: gpsOnly ? "location removed" : "metadata removed", note: plan.note };
+  return { out, detail: gpsOnly ? "location removed" : "metadata removed", note: notes.filter(Boolean).join(", ") };
 }
 
 function hasGPS(path) {
@@ -579,9 +582,10 @@ function removeBackground(info, crop) {
   const req = $.VNGenerateForegroundInstanceMaskRequest.alloc.init;
   if (!handler.performRequestsError($([req]), Ref())) throw new Error("Vision could not analyse the image");
   const results = req.results;
-  if (results.isNil() || results.count === 0) throw new Error("no subject found");
+  // NSUInteger results arrive from the bridge as strings
+  if (results.isNil() || Number(results.count) === 0) throw new Error("no subject found");
   const obs = results.objectAtIndex(0);
-  if (obs.allInstances.count === 0) throw new Error("no subject found");
+  if (Number(obs.allInstances.count) === 0) throw new Error("no subject found");
   const buf = obs.generateMaskedImageOfInstancesFromRequestHandlerCroppedToInstancesExtentError(obs.allInstances, handler, crop, Ref());
   if (!buf) throw new Error("could not build the mask");
   const ci = $.CIImage.imageWithCVPixelBuffer(buf);
@@ -594,7 +598,8 @@ function removeBackground(info, crop) {
   }
   const out = commit(tmp, plan);
   const ext = ci.extent;
-  return { out, detail: `${Math.round(ext.size.width)}×${Math.round(ext.size.height)}, transparent PNG`, note: plan.note };
+  const note = [plan.note, info.animated ? "first frame only" : ""].filter(Boolean).join(", ");
+  return { out, detail: `${Math.round(ext.size.width)}×${Math.round(ext.size.height)}, transparent PNG`, note };
 }
 
 // ---------- apply (image action) ----------
@@ -604,9 +609,42 @@ const OP_VERBS = {
   strip: ["Cleaned", "clean"], optimize: ["Optimized", "optimize"], removebg: ["Removed the background of", "process"],
 };
 
+// Large file lists are kept in the cache and passed as "@<path>" so the Script Filter JSON stays small
+const INLINE_FILES_MAX = 8000;
+function filesVar(files) {
+  const json = JSON.stringify(files);
+  if (json.length <= INLINE_FILES_MAX) return json;
+  let h = 5381;
+  for (let i = 0; i < json.length; i++) h = ((h * 33) ^ json.charCodeAt(i)) >>> 0;
+  const dir = `${cacheDir()}/selections`;
+  FM.createDirectoryAtPathWithIntermediateDirectoriesAttributesError(dir, true, $(), $());
+  const path = `${dir}/${h.toString(16)}-${files.length}.json`;
+  if (!exists(path)) {
+    pruneSelections(dir);
+    $(json).writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, $());
+  }
+  return "@" + path;
+}
+function pruneSelections(dir) {
+  const list = FM.contentsOfDirectoryAtPathError(dir, $());
+  if (list.isNil()) return;
+  const now = Date.now();
+  for (const name of ObjC.deepUnwrap(list) || []) {
+    const a = FM.attributesOfItemAtPathError(`${dir}/${name}`, $());
+    if (!a.isNil() && now - a.fileModificationDate.timeIntervalSince1970 * 1000 > 86400000) FM.removeItemAtPathError(`${dir}/${name}`, $());
+  }
+}
+
 function filesFromEnv() {
   try {
-    const f = JSON.parse(env("mt_files", "[]"));
+    let raw = env("mt_files", "[]");
+    if (raw.startsWith("@")) {
+      const path = raw.slice(1);
+      // only lists this workflow wrote
+      if (!path.startsWith(`${cacheDir()}/selections/`) || path.includes("/../")) return [];
+      raw = readText(path) || "[]";
+    }
+    const f = JSON.parse(raw);
     return Array.isArray(f) ? f.filter((x) => typeof x === "string" && x) : [];
   } catch (e) {
     return [];
@@ -619,6 +657,7 @@ function applyImages(op) {
   const kind = op.split(":")[0];
   const [verb] = OP_VERBS[kind] || ["Processed"];
   const done = [], failed = [], skipped = [], notes = new Set();
+  if (files.length >= 10) notifyAlfred(`Processing ${files.length} images…`);
   for (const f of files) {
     try {
       if (!exists(f)) throw new Error("file not found");
@@ -671,6 +710,21 @@ function appendLog(line) {
   h.seekToEndOfFile;
   h.writeData($(line + "\n").dataUsingEncoding($.NSUTF8StringEncoding));
   h.closeFile;
+}
+
+// Post a notification through the workflow's External Trigger (the action's own notification comes at the end)
+function notifyAlfred(msg) {
+  const t = env("MT_TEST_NOTIFY_FILE", "");
+  if (t) {
+    const prev = readText(t) || "";
+    $(prev + msg + "\n").writeToFileAtomicallyEncodingError(t, true, $.NSUTF8StringEncoding, $());
+    return;
+  }
+  try {
+    Application("com.runningwithcrayons.Alfred").runTrigger("notify", { inWorkflow: env("alfred_workflow_bundleid", ""), withArgument: msg });
+  } catch (e) {
+    // Alfred not reachable: the final notification still arrives
+  }
 }
 
 function reveal(paths) {
@@ -827,7 +881,7 @@ function buildCommand(tool, opId, src, tmp, kind, progress, trim) {
         const vf = `scale=w='if(gte(iw,ih),-2,trunc(min(${n},iw)/2)*2)':h='if(gte(iw,ih),trunc(min(${n},ih)/2)*2,-2)'`;
         return [...pre, ...inp, ...vtArgs("h264"), "-vf", vf, ...aac, ...fast, out];
       }
-      case "mute": return [...pre, ...inp, "-map", "0", "-map", "-0:a", "-c", "copy", out];
+      case "mute": return [...pre, ...inp, "-map", "0:v", "-map", "0:s?", "-c", "copy", "-an", out];
       case "mp3": return [...pre, ...inp, "-vn", "-map", "0:a:0", "-c:a", "libmp3lame", "-q:a", "2", out];
       case "m4a": return [...pre, ...inp, "-vn", "-map", "0:a:0", ...aac, out];
       case "wav": return [...pre, ...inp, "-vn", "-map", "0:a:0", "-c:a", "pcm_s16le", out];
@@ -874,7 +928,7 @@ function enqueue(opId) {
   const trim = base === "trim" ? parseTrim(opId.slice(5).replace(/_/g, ":")) : null;
   if (base === "trim" && !trim) return { queued: 0, message: "Invalid trim range" };
   const batch = `${Date.now()}-${$.NSProcessInfo.processInfo.processIdentifier}`;
-  const jobs = [], failed = [], taken = [];
+  const jobs = [], failed = [], taken = [], notes = new Set();
   for (const f of files) {
     const kind = kindOf(f);
     if (!exists(f) || isDir(f) || (kind !== "video" && kind !== "audio")) {
@@ -891,7 +945,8 @@ function enqueue(opId) {
     if (!plan.replace && taken.includes(plan.path)) plan.path = uniquePath(dirOf(plan.path), stemOf(plan.path), extOf(plan.path), taken);
     taken.push(plan.path);
     const tmp = tempPathFor(plan.path);
-    const cmd = buildCommand(tool, opId, f, tmp, kind, `${cacheDir()}/progress.txt`, trim);
+    const cmd = buildCommand(tool, opId, f, tmp, kind, `file:${cacheDir()}/progress.txt`, trim);
+    if (plan.note) notes.add(plan.note);
     jobs.push([baseName(f), f, plan.path, tmp, plan.replace ? "1" : "0", env("mt_reveal", "0") === "1" ? "1" : "0", tool, ...cmd]);
   }
   jobs.forEach((j, i) => {
@@ -902,7 +957,7 @@ function enqueue(opId) {
     FM.moveItemAtPathToPathError(tmpName, name, $());
   });
   let message = "";
-  if (jobs.length) message = `Queued ${jobs.length} file${jobs.length === 1 ? "" : "s"}${failed.length ? ` · ${failed.length} skipped (${failed[0]})` : ""}`;
+  if (jobs.length) message = `Queued ${jobs.length} file${jobs.length === 1 ? "" : "s"}${failed.length ? ` · ${failed.length} skipped (${failed[0]})` : ""}${notes.size ? ` · ${[...notes].join(", ")}` : ""}`;
   else message = `Nothing queued: ${failed[0] || "no matching files"}`;
   return { queued: jobs.length, message };
 }
@@ -921,12 +976,26 @@ function processAlive(pid) {
   }
   return $.kill(pid, 0) === 0;
 }
+// A pid survives in the lock after a crash or restart and may since belong to another process
+function isWorker(pid) {
+  if (!processAlive(pid)) return false;
+  const t = $.NSTask.alloc.init;
+  t.executableURL = $.NSURL.fileURLWithPath("/bin/ps");
+  t.arguments = $(["-p", String(pid), "-o", "command="]);
+  const p = $.NSPipe.pipe;
+  t.standardOutput = p;
+  t.standardError = $.NSFileHandle.fileHandleWithNullDevice;
+  if (!t.launchAndReturnError($())) return false;
+  const d = p.fileHandleForReading.readDataToEndOfFile;
+  t.waitUntilExit;
+  return /worker\.sh/.test($.NSString.alloc.initWithDataEncoding(d, $.NSUTF8StringEncoding).js);
+}
 function workerStatus() {
   const cache = cacheDir();
   const pid = readText(`${cache}/worker.lock/pid`);
   if (!pid) return null;
   const n = parseInt(pid, 10);
-  if (!n || !processAlive(n)) return null;
+  if (!n || !isWorker(n)) return null;
   const state = (readText(`${cache}/worker.lock/state`) || "").split("\n");
   const duration = parseFloat(state[0]) || 0;
   const label = state[1] || "";
@@ -989,7 +1058,7 @@ function plural(n, word) {
 
 // A runnable operation item. Files travel in variables as JSON; the op id is the arg.
 function opItem(title, subtitle, op, files, icon, extra = {}) {
-  const vars = { mt_files: JSON.stringify(files), mt_op: op };
+  const vars = { mt_files: filesVar(files), mt_op: op };
   return Object.assign({
     uid: undefined,
     title,
@@ -1001,7 +1070,7 @@ function opItem(title, subtitle, op, files, icon, extra = {}) {
     mods: {
       cmd: { arg: op, valid: true, subtitle: "Run, then reveal the result in Finder", variables: Object.assign({ mt_reveal: "1" }, vars) },
     },
-    text: { copy: files.join("\n"), largetype: files.map(baseName).join("\n") },
+    text: files.length <= 200 ? { copy: files.join("\n"), largetype: files.map(baseName).join("\n") } : { largetype: `${files.length} files` },
   }, extra);
 }
 
@@ -1052,6 +1121,9 @@ function imageItems(files, query) {
     return [opItem(`Rotate ${noun} ${d === 270 ? "90° left" : d === 90 ? "90° right" : "180°"}`, "Clockwise angle " + d + "°", `rotate:${d}`, files, "rotate")];
   }
   const fmtAsked = FORMAT_ALIASES[q.replace(/^(?:convert\s+(?:to\s+)?|to\s+)/, "")];
+  if (fmtAsked && files.every((f) => formatOfFile(f) === fmtAsked)) {
+    return [info(`Already ${FORMATS[fmtAsked].name}`, `Try optimize to re-encode at quality ${Math.round(quality() * 100)}%`, "info", { autocomplete: "optimize" })];
+  }
   if (fmtAsked && !fmts.includes(fmtAsked)) {
     return [info(`This Mac can't write ${FORMATS[fmtAsked].name} images`, `ImageIO on this macOS version only encodes ${fmts.map((k) => FORMATS[k].name).join(", ")}`, "error")];
   }

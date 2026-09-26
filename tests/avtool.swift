@@ -36,7 +36,8 @@ let fps = 30
 for i in 0..<(fps * seconds) {
     while !input.isReadyForMoreMediaData { usleep(1000) }
     var pb: CVPixelBuffer?
-    CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &pb)
+    if let pool = adaptor.pixelBufferPool { CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb) }
+    if pb == nil { CVPixelBufferCreate(nil, w, h, kCVPixelFormatType_32BGRA, nil, &pb) }
     let buf = pb!
     CVPixelBufferLockBaseAddress(buf, [])
     let base = CVPixelBufferGetBaseAddress(buf)!.assumingMemoryBound(to: UInt8.self)

@@ -13,6 +13,8 @@ batches="$cache/batches"
 mkdir -p "$queue" "$batches"
 
 alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null; }
+# The pid in a stale lock (after a crash or restart) may since belong to another process
+is_worker() { alive "$1" && /bin/ps -p "$1" -o command= 2>/dev/null | grep -q 'worker\.sh'; }
 
 notify() {
   if [ -n "$MT_TEST_NOTIFY_FILE" ]; then
@@ -36,7 +38,7 @@ reveal() {
 
 if [ "$1" = "--cancel" ]; then
   rm -f "$queue"/*.job
-  if [ -d "$lock" ] && alive "$(cat "$lock/pid" 2>/dev/null)"; then
+  if [ -d "$lock" ] && is_worker "$(cat "$lock/pid" 2>/dev/null)"; then
     touch "$lock/cancel"
     child=$(cat "$lock/child" 2>/dev/null)
     alive "$child" && kill "$child" 2>/dev/null
@@ -59,7 +61,7 @@ acquire() {
     # Another worker may be between mkdir and writing its pid: only steal an old, empty lock
     age=$(($(date +%s) - $(stat -f %m "$lock" 2>/dev/null || date +%s)))
     [ "$age" -lt 10 ] && return 1
-  elif alive "$pid"; then
+  elif is_worker "$pid"; then
     return 1
   fi
   rm -rf "$lock"

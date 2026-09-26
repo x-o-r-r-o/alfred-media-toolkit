@@ -200,6 +200,32 @@ class ScriptFilterTests(Base):
         self.assertEqual(items("img", "99999px", [jpg])[0]["valid"], False)
         self.assertEqual(items("img", "zzz", [jpg])[0]["title"], "No matching image operation")
 
+    def test_already_in_that_format(self):
+        jpg = make(self.p("a.jpg"))
+        it = items("img", "jpg", [jpg])
+        self.assertEqual(it[0]["title"], "Already JPEG")
+
+    def test_huge_selection_goes_through_cache(self):
+        real = make(self.p("real.jpg"), w=40, h=40)
+        many = [self.p(f"{'long name ' * 5}{i}.jpg") for i in range(600)] + [real]
+        e = base_env(MT_TEST_SELECTION=json.dumps(many))
+        out = subprocess.run(["osascript", "-l", "JavaScript", "./media.js", "img", ""], cwd=SRC, env=e, capture_output=True, text=True)
+        self.assertLess(len(out.stdout), 60000)
+        it = json.loads(out.stdout)["items"]
+        ref = it[0]["variables"]["mt_files"]
+        self.assertTrue(ref.startswith("@" + CACHE), ref)
+        e = base_env(mt_op="resize:pct:50", mt_files=ref)
+        msg = subprocess.run(["./action.sh", "resize:pct:50"], cwd=SRC, env=e, capture_output=True, text=True).stdout
+        self.assertTrue(msg.startswith("Resized 1 file · 600 failed"), msg)
+        self.assertTrue(os.path.exists(self.p("real-edited.jpg")))
+        # only lists written by the workflow are read
+        with open(self.p("list.json"), "w") as f:
+            json.dump([real], f)
+        self.assertEqual(act("rotate:90", []) , "No files to process")
+        e = base_env(mt_op="rotate:90", mt_files="@" + self.p("list.json"))
+        msg = subprocess.run(["./action.sh", "rotate:90"], cwd=SRC, env=e, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(msg, "No files to process")
+
     def test_hostile_queries(self):
         jpg = make(self.p("a.jpg"))
         for q in ['"; rm -rf ~ #', "$(touch /tmp/pwned)", "`id`", "'\n\t", "🙂 ünïcödé", "\\", "%", "x" * 5000]:
@@ -303,8 +329,11 @@ class ScriptFilterTests(Base):
         lock = os.path.join(CACHE, "worker.lock")
         os.makedirs(lock, exist_ok=True)
         try:
+            fake = subprocess.Popen(["/bin/bash", "-c", "exec -a worker.sh /bin/sleep 30"])
+            self.addCleanup(fake.wait)
+            self.addCleanup(fake.kill)
             with open(os.path.join(lock, "pid"), "w") as f:
-                f.write(str(os.getpid()))
+                f.write(str(fake.pid))
             with open(os.path.join(lock, "state"), "w") as f:
                 f.write("200\nholiday ü.mov\nffmpeg\n")
             with open(os.path.join(CACHE, "progress.txt"), "w") as f:
@@ -313,9 +342,10 @@ class ScriptFilterTests(Base):
             self.assertEqual(data["items"][0]["title"], "Converting holiday ü.mov · 50%")
             self.assertEqual(data["items"][0]["arg"], "cancel")
             self.assertEqual(data.get("rerun"), 1)
-            with open(os.path.join(lock, "pid"), "w") as f:
-                f.write("999999")  # dead worker: no status
-            self.assertNotEqual(items("vid", "", [], MT_TEST_FFMPEG="none")[0]["arg"] if items("vid", "", [], MT_TEST_FFMPEG="none")[0].get("arg") else "", "cancel")
+            for pid in ("999999", str(os.getpid())):  # dead worker, or a reused pid (regression: showed a stale status)
+                with open(os.path.join(lock, "pid"), "w") as f:
+                    f.write(pid)
+                self.assertNotIn("cancel", [i.get("arg") for i in items("vid", "", [], MT_TEST_FFMPEG="none")])
         finally:
             shutil.rmtree(lock, ignore_errors=True)
 
@@ -323,6 +353,35 @@ class ScriptFilterTests(Base):
 # ---------------------------------------------------------------- image operations
 
 class ImageTests(Base):
+    # ---- regressions from audit pass 1
+    def test_no_subject_found(self):
+        # NSUInteger counts come back as strings from the bridge: the empty-result check never fired
+        src = make(self.p("plain.png"), "public.png", 300, 200, plain=True)
+        self.assertEqual(act("removebg", [src]), "Failed: plain.png: no subject found")
+        self.assertEqual(self.listdir(), ["plain.png"])
+
+    def test_panorama_downscale_is_not_too_large(self):
+        # the thumbnail guard used target² instead of the real area
+        src = make(self.p("pano.png"), "public.png", 2000, 10)
+        msg = act("resize:max:1000", [src], MT_TEST_MAX_PIXELS=30000)
+        self.assertIn("(1000×5)", msg)
+
+    def test_strip_notes_and_gif_loop(self):
+        tif = make(self.p("s.tiff"), "public.tiff", 50, 50, exif=True)
+        self.assertIn("saved as JPEG", act("strip:all", [tif], MT_TEST_HIDE_FORMATS="tiff"))
+        gif = make(self.p("l.gif"), "com.compuserve.gif", 40, 40, frames=3, loop=3)
+        act("strip:all", [gif])
+        info = probe(self.p("l-edited.gif"))
+        self.assertEqual((info["count"], info["loop"]), (3, 3))
+        act("resize:pct:50", [gif])
+        self.assertEqual(probe(self.p("l-edited-2.gif"))["loop"], 3)
+
+    def test_many_files_notify_early(self):
+        files = [make(self.p(f"n{i}.png"), "public.png", 10, 10) for i in range(10)]
+        self.assertEqual(act("rotate:90", files), "Rotated 10 files")
+        self.assertEqual(notifications(), ["Processing 10 images…"])
+
+
     def test_resize_percent_and_naming(self):
         src = make(self.p("photo.jpg"), w=400, h=300)
         msg = act("resize:pct:50", [src])
@@ -648,7 +707,7 @@ class QueueTests(Base):
         self.assertIn("libvpx-vp9", jobs[0])
         _, jobs = self.job("mute", [mov], **env)
         self.assertTrue(jobs[0][5].endswith("-edited.mov"))
-        self.assertIn("-0:a", jobs[0])
+        self.assertIn("-an", jobs[0])
         _, jobs = self.job("mp3", [mov], **env)
         self.assertTrue(jobs[0][5].endswith(".mp3"))
         self.assertIn("libmp3lame", jobs[0])
@@ -683,6 +742,22 @@ class QueueTests(Base):
         self.assertEqual(jobs, [])
         self.assertEqual(self.job("trim:bad", [a], MT_TEST_FFMPEG="/f/ffmpeg")[0], "Invalid trim range")
 
+    def test_mute_and_read_only_notes(self):
+        mov = self.p("m.mp4")
+        open(mov, "w").close()
+        _, jobs = self.job("mute", [mov], MT_TEST_FFMPEG="/f/ffmpeg")
+        j = jobs[0]
+        self.assertEqual(j[j.index("-map") + 1], "0:v")  # regression: -map 0 failed on data streams
+        self.assertIn("-an", j)
+        self.assertTrue(j[j.index("-progress") + 1].startswith("file:"))
+        fallback = os.path.join(self.dir, "Downloads")
+        os.makedirs(fallback)
+        os.chmod(self.d, 0o555)
+        msg, jobs = self.job("mp4", [mov], MT_TEST_FFMPEG="/f/ffmpeg", MT_TEST_FALLBACK_DIR=fallback)
+        self.assertEqual(msg, "Queued 1 file · saved to Downloads because the folder is read-only")
+        self.assertEqual(jobs[0][5], os.path.join(fallback, "m-edited.mp4"))
+        self.assertTrue(jobs[0][6].startswith(fallback + "/.mt-"))
+
     def test_copy_install_command(self):
         e = base_env(mt_op="copy", mt_files="[]")
         old = subprocess.run(["pbpaste"], capture_output=True).stdout
@@ -707,6 +782,13 @@ class QueueTests(Base):
         self.assertIn("Queued", msg)
         self.assertFalse(os.path.exists(lock))
         self.assertEqual(len(notifications()), 1)
+        # regression: a lock whose pid now belongs to another process blocked the queue forever
+        os.makedirs(lock, exist_ok=True)
+        with open(os.path.join(lock, "pid"), "w") as f:
+            f.write(str(os.getpid()))
+        msg = act("flac", [wav], MT_TEST_FFMPEG="none", MT_TEST_WORKER_FOREGROUND=1)
+        self.assertTrue(os.path.exists(self.p("tone.flac")))
+        self.assertFalse(os.path.exists(lock))
 
     @unittest.skipUnless(os.path.exists("/usr/bin/afconvert"), "afconvert missing")
     def test_afconvert_audio(self):
@@ -742,7 +824,7 @@ class AVConvertTests(Base):
             self.skipTest("avtool could not be built")
         self.mov = self.p("clip ü 'x'.mov")
         r = subprocess.run([AVTOOL, "make", self.mov, "320", "240", "3"], capture_output=True, text=True)
-        self.assertEqual(r.stdout.strip(), "ok")
+        self.assertEqual(r.stdout.strip(), "ok", (r.returncode, r.stderr[-800:]))
 
     def run_op(self, op, files=None, **env):
         return act(op, files or [self.mov], MT_TEST_FFMPEG="none", MT_TEST_WORKER_FOREGROUND=1, **env)

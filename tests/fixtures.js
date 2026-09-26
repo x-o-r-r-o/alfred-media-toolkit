@@ -18,7 +18,10 @@ function dict(o) {
 function frame(w, h, o, i) {
   const cs = $.CGColorSpaceCreateWithName($.kCGColorSpaceSRGB);
   const ctx = $.CGBitmapContextCreate(null, w, h, 8, 0, cs, o.alpha ? 1 : 5);
-  if (o.alpha) {
+  if (o.plain) {
+    $.CGContextSetRGBFillColor(ctx, 0.5, 0.5, 0.5, 1);
+    $.CGContextFillRect(ctx, $.CGRectMake(0, 0, w, h));
+  } else if (o.alpha) {
     $.CGContextClearRect(ctx, $.CGRectMake(0, 0, w, h));
     $.CGContextSetRGBFillColor(ctx, 0.9, 0.2, 0.1, 1);
     $.CGContextFillEllipseInRect(ctx, $.CGRectMake(w / 4, h / 4, w / 2, h / 2));
@@ -51,7 +54,7 @@ function frame(w, h, o, i) {
 function make(path, uti, w, h, o) {
   const count = o.frames || 1;
   const dest = $.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(path), $(uti), count, null);
-  if (count > 1) $.CGImageDestinationSetProperties(dest, dict({ "{GIF}": { LoopCount: 0 } }));
+  if (count > 1) $.CGImageDestinationSetProperties(dest, dict({ "{GIF}": { LoopCount: o.loop || 0 } }));
   for (let i = 0; i < count; i++) {
     const p = {};
     if (o.orientation) p.Orientation = o.orientation;

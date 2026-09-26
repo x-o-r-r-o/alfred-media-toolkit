@@ -131,15 +131,21 @@ run_job() {
   local tmp="${f[6]}" replace="${f[7]}" rev="${f[8]}" tool="${f[9]}" cmd=("${f[@]:10}")
   local duration=0 probe rc child dest reason
   if [ "$tool" = ffmpeg ]; then
+    # Progress is out_time / duration: a trim's duration is its -t, otherwise ask ffprobe
+    for ((x = 0; x + 1 < ${#cmd[@]}; x++)); do
+      [ "${cmd[x]}" = "-t" ] && duration="${cmd[x + 1]}"
+    done
     probe="$(dirname "${cmd[0]}")/ffprobe"
-    if [ -x "$probe" ]; then
+    if [ "$duration" = 0 ] && [ -x "$probe" ]; then
       duration=$("$probe" -v error -show_entries format=duration -of default=nw=1:nk=1 "file:$src" 2>/dev/null | head -1)
     fi
   fi
   printf '%s\n%s\n%s\n' "${duration:-0}" "$label" "$tool" >"$lock/state"
   : >"$progress"
   { printf '\n== %s  %s (%s of %s)\n' "$(date '+%F %T')" "$label" "$idx" "$count"; printf '%q ' "${cmd[@]}"; echo; } >>"$log"
-  if [ ! -e "$src" ]; then
+  if [ -e "$lock/cancel" ]; then
+    return # cancelled between two files
+  elif [ ! -e "$src" ]; then
     record "$batch" fail "$label" "file not found"
   else
     if [ "$tool" = avconvert ]; then
@@ -149,7 +155,7 @@ run_job() {
     fi
     child=$!
     echo "$child" >"$lock/child"
-    wait "$child"
+    wait "$child" 2>/dev/null
     rc=$?
     rm -f "$lock/child"
     cat "$cache/last.err" >>"$log" 2>/dev/null

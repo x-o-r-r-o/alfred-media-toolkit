@@ -572,6 +572,12 @@ class ImageTests(Base):
         self.assertEqual(sips(self.p("subject-2.png"))[:2], (400, 600))  # oriented; subject.png exists already
         self.assertIn("macOS 14", act("removebg", [src], MT_TEST_NO_VISION=1))
 
+    def test_remove_background_never_replaces(self):
+        src = make(self.p("keep.png"), "public.png", 400, 300, subject=True)
+        act("removebg", [src], replace_originals=1)
+        self.assertEqual(self.listdir(), ["keep-edited.png", "keep.png"])
+        self.assertFalse(probe(src)["hasAlpha"] and probe(src, [(2, 2)])["colors"][0][3] == 0)
+
     def test_replace_originals(self):
         src = make(self.p("r.jpg"), w=400, h=200)
         msg = act("resize:pct:50", [src], replace_originals=1)
@@ -757,6 +763,72 @@ class QueueTests(Base):
         self.assertEqual(msg, "Queued 1 file · saved to Downloads because the folder is read-only")
         self.assertEqual(jobs[0][5], os.path.join(fallback, "m-edited.mp4"))
         self.assertTrue(jobs[0][6].startswith(fallback + "/.mt-"))
+
+    # ---- regressions from audit pass 2
+    def test_stream_mapping_and_custom_ffmpeg(self):
+        mkv = self.p("subs.mkv")
+        open(mkv, "w").close()
+        for op in ("mp4", "hevc", "mov", "webm", "compress:23", "scale:720", "trim:0_01-0_02"):
+            _, jobs = self.job(op, [mkv], MT_TEST_FFMPEG="/f/ffmpeg")
+            j = jobs[0]
+            self.assertIn("0:v:0", j, op)  # bitmap subtitles in MKV used to fail MP4 conversions
+            self.assertIn("-sn", j, op)
+            self.assertLess(j.index("-i"), j.index("-map"), op)
+        fake = os.path.join(self.dir, "my ffmpeg 7")
+        with open(fake, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(fake, 0o755)
+        e = dict(ffmpeg_path=fake)
+        _, jobs = self.job("webm", [mkv], **e)
+        self.assertEqual(jobs[0][10], fake)
+        self.assertIn("webm", [i.get("arg") for i in items("vid", "", [mkv], **e)])
+
+    def test_ts_is_not_video(self):
+        ts = self.p("index.ts")
+        open(ts, "w").close()
+        self.assertEqual(items("vid", "", [ts], MT_TEST_FFMPEG="/f/ffmpeg")[-1]["title"], "Select video or audio files in Finder first")
+
+    def write_job(self, cmd, tool="ffmpeg", idx="1", count="1", batch="b1"):
+        q = os.path.join(CACHE, "queue")
+        os.makedirs(q, exist_ok=True)
+        tmp = self.p(".mt-test.out")
+        fields = [batch, idx, count, "fake ü.mov", self.p("src.mov"), self.p("out.mov"), tmp, "0", "0", tool] + cmd
+        open(self.p("src.mov"), "w").close()
+        with open(os.path.join(q, f"{batch}-{idx.zfill(5)}.job"), "wb") as f:
+            f.write(b"".join(x.encode() + b"\0" for x in fields))
+        return tmp
+
+    def test_cancel_running_conversion(self):
+        # A long "conversion" is killed, its temp file dropped, the queue cleared and a notification sent
+        tmp = self.write_job(["/bin/sh", "-c", 'echo partial > "$1"; exec sleep 30', "sh", self.p(".mt-test.out")], count="2")
+        self.write_job(["/bin/sh", "-c", "exit 0"], idx="2", count="2")
+        w = subprocess.Popen(["./worker.sh"], cwd=SRC, env=base_env())
+        lock = os.path.join(CACHE, "worker.lock")
+        end = time.time() + 20
+        while not os.path.exists(os.path.join(lock, "child")) and time.time() < end:
+            time.sleep(0.1)
+        with open(os.path.join(lock, "state")) as f:
+            self.assertEqual(f.read().split("\n")[1], "fake ü.mov")
+        out = subprocess.run(["./worker.sh", "--cancel"], cwd=SRC, env=base_env(), capture_output=True, text=True).stdout
+        self.assertEqual(out.strip(), "Cancelled the conversions")
+        self.assertEqual(w.wait(timeout=10), 0)
+        self.assertFalse(os.path.exists(tmp))
+        self.assertFalse(os.path.exists(self.p("out.mov")))
+        self.assertFalse(os.path.exists(lock))
+        self.assertEqual(notifications(), ["Cancelled the conversions"])
+        self.assertEqual([f for f in os.listdir(os.path.join(CACHE, "queue")) if f.endswith(".job")], [])
+
+    def test_trim_progress_uses_trim_length(self):
+        self.write_job(["/bin/sh", "-c", 'sleep 1.5; echo x > "$0"', self.p(".mt-test.out"), "-t", "15.5"])
+        w = subprocess.Popen(["./worker.sh"], cwd=SRC, env=base_env())
+        state = os.path.join(CACHE, "worker.lock", "state")
+        end = time.time() + 10
+        while not os.path.exists(state) and time.time() < end:
+            time.sleep(0.05)
+        with open(state) as f:
+            self.assertEqual(f.readline().strip(), "15.5")
+        w.wait(timeout=20)
+        self.assertEqual(notifications(), ["Converted fake ü.mov → out.mov"])
 
     def test_copy_install_command(self):
         e = base_env(mt_op="copy", mt_files="[]")

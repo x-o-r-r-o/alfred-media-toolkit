@@ -21,7 +21,8 @@ const FM = $.NSFileManager.defaultManager;
 // ---------- file types ----------
 
 const IMAGE_EXT = "jpg jpeg jpe jfif png heic heif hif tif tiff gif bmp webp avif jp2 j2k psd tga ico icns dng cr2 cr3 nef nrw arw srf sr2 raf orf rw2 pef srw 3fr erf mos raw".split(" ");
-const VIDEO_EXT = "mp4 m4v mov qt mkv webm avi wmv flv mpg mpeg m2v mts m2ts ts 3gp 3g2 ogv vob mxf".split(" ");
+// (not .ts: too often TypeScript)
+const VIDEO_EXT = "mp4 m4v mov qt mkv webm avi wmv flv mpg mpeg m2v mts m2ts 3gp 3g2 ogv vob mxf".split(" ");
 const AUDIO_EXT = "mp3 m4a m4b aac wav wave aif aiff aifc flac ogg oga opus wma caf alac amr ac3 mka".split(" ");
 // What AVFoundation (avconvert) and Core Audio (afconvert) read, for when ffmpeg is missing
 const AVF_VIDEO_EXT = "mp4 m4v mov qt 3gp 3g2".split(" ");
@@ -400,7 +401,7 @@ function processImage(path, op) {
   const [kind, ...args] = op.split(":");
   const notes = [];
 
-  if (kind === "removebg") return removeBackground(info, args[0] === "crop");
+  if (kind === "removebg") return removeBackground(info, args[0] === "crop"); // a new cut-out: never replaces the original
   if (kind === "strip") return stripMetadata(info, srcFmt, args[0] === "gps");
 
   // Output format: the source's own format when it can be written, otherwise PNG/JPEG
@@ -575,7 +576,7 @@ function hasPrivateMetadata(path) {
 // Offline background removal with Vision (macOS 14+): foreground instance mask → transparent PNG.
 function removeBackground(info, crop) {
   if (!backgroundRemovalAvailable()) throw new Error("background removal needs macOS 14 or later");
-  const plan = plannedOutput(info.path, "png");
+  const plan = plannedOutput(info.path, "png", { neverReplace: true });
   const tmp = tempPathFor(plan.path);
   const img = orientedFrame(info, 0, null);
   const handler = $.VNImageRequestHandler.alloc.initWithCGImageOptions(img, $());
@@ -744,6 +745,7 @@ function which(name) {
   if (test === "none") return null;
   if (test) return name === "ffmpeg" ? test : `${dirOf(test)}/${name}`;
   const dirs = [];
+  if (custom && name === "ffmpeg" && !isDir(custom) && FM.isExecutableFileAtPath(custom)) return custom;
   if (custom) dirs.push(isDir(custom) ? custom : dirOf(custom));
   dirs.push("/opt/homebrew/bin", "/usr/local/bin", ...env("PATH", "").split(":").filter(Boolean));
   for (const d of dirs) {
@@ -862,24 +864,28 @@ function buildCommand(tool, opId, src, tmp, kind, progress, trim) {
     if (trim && trim.end !== null) inp.push("-t", String(trim.end - trim.start));
     const out = "file:" + tmp;
     const aac = ["-c:a", "aac", "-b:a", "192k"];
+    // First video stream and every audio stream; subtitles and data streams are left out because MP4/WebM
+    // can't take most of them (bitmap subtitles from MKV would fail the whole conversion)
+    const vmap = ["-map", "0:v:0", "-map", "0:a?", "-sn", "-dn"];
     const fast = ["-movflags", "+faststart"];
     const even = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
     switch (base) {
-      case "mp4": return [...pre, ...inp, ...vtArgs("h264"), "-vf", even, ...aac, ...fast, out];
-      case "hevc": return [...pre, ...inp, ...vtArgs("hevc"), "-vf", even, ...aac, ...fast, out];
-      case "mov": return [...pre, ...inp, ...vtArgs("h264"), "-vf", even, ...aac, out];
-      case "webm": return [...pre, ...inp, "-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-c:a", "libopus", "-b:a", "128k", out];
+      case "mp4": return [...pre, ...inp, ...vmap, ...vtArgs("h264"), "-vf", even, ...aac, ...fast, out];
+      case "hevc": return [...pre, ...inp, ...vmap, ...vtArgs("hevc"), "-vf", even, ...aac, ...fast, out];
+      case "mov": return [...pre, ...inp, ...vmap, ...vtArgs("h264"), "-vf", even, ...aac, out];
+      case "webm": return [...pre, ...inp, ...vmap, "-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-c:a", "libopus", "-b:a", "128k", out];
       case "gif": {
+        // only the video stream: -an keeps attached audio out
         const w = parseInt(env("gif_width", "480"), 10);
         const fps = parseInt(env("gif_fps", "15"), 10) || 15;
         const scale = w > 0 ? `,scale=w='min(${w},iw)':h=-1:flags=lanczos` : "";
-        return [...pre, ...inp, "-vf", `fps=${fps}${scale},split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`, "-loop", "0", out];
+        return [...pre, ...inp, "-map", "0:v:0", "-an", "-sn", "-vf", `fps=${fps}${scale},split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`, "-loop", "0", out];
       }
-      case "compress": return [...pre, ...inp, "-c:v", "libx264", "-crf", arg, "-preset", "medium", "-pix_fmt", "yuv420p", "-vf", even, "-c:a", "aac", "-b:a", "128k", ...fast, out];
+      case "compress": return [...pre, ...inp, ...vmap, "-c:v", "libx264", "-crf", arg, "-preset", "medium", "-pix_fmt", "yuv420p", "-vf", even, "-c:a", "aac", "-b:a", "128k", ...fast, out];
       case "scale": {
         const n = parseInt(arg, 10);
         const vf = `scale=w='if(gte(iw,ih),-2,trunc(min(${n},iw)/2)*2)':h='if(gte(iw,ih),trunc(min(${n},ih)/2)*2,-2)'`;
-        return [...pre, ...inp, ...vtArgs("h264"), "-vf", vf, ...aac, ...fast, out];
+        return [...pre, ...inp, ...vmap, ...vtArgs("h264"), "-vf", vf, ...aac, ...fast, out];
       }
       case "mute": return [...pre, ...inp, "-map", "0:v", "-map", "0:s?", "-c", "copy", "-an", out];
       case "mp3": return [...pre, ...inp, "-vn", "-map", "0:a:0", "-c:a", "libmp3lame", "-q:a", "2", out];
@@ -892,7 +898,7 @@ function buildCommand(tool, opId, src, tmp, kind, progress, trim) {
           const codec = { mp3: ["-c:a", "libmp3lame", "-q:a", "2"], wav: ["-c:a", "pcm_s16le"], flac: ["-c:a", "flac"], aiff: ["-c:a", "pcm_s16be"], aif: ["-c:a", "pcm_s16be"] }[extOf(tmp)] || aac;
           return [...pre, ...inp, "-vn", "-map", "0:a:0", ...codec, out];
         }
-        return [...pre, ...inp, ...vtArgs("h264"), "-vf", even, ...aac, ...fast, out];
+        return [...pre, ...inp, ...vmap, ...vtArgs("h264"), "-vf", even, ...aac, ...fast, out];
       }
     }
   }

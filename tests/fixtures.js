@@ -2,7 +2,8 @@
 //   osascript -l JavaScript fixtures.js make <path> <uti> <width> <height> '<json options>'
 //     options: orientation (1-8), gps (bool), exif (bool), alpha (transparent background + circle),
 //              quadrant ("tl"|"bl"): red quadrant on blue (top-left origin), frames (n, animated), delay,
-//              subject (a shape on a plain background), noise (hard to compress), quality (0-1)
+//              subject (a shape on a plain background), noise (hard to compress), quality (0-1),
+//              gray / p3 / depth16 (colour space and bits per channel; frames on TIFF makes pages)
 //   osascript -l JavaScript fixtures.js probe <path> '[[x,y],…]'   → JSON with size, metadata and pixel colours
 ObjC.import("Foundation"); ObjC.import("AppKit"); ObjC.import("CoreGraphics"); ObjC.import("ImageIO");
 
@@ -16,8 +17,9 @@ function dict(o) {
 }
 
 function frame(w, h, o, i) {
-  const cs = $.CGColorSpaceCreateWithName($.kCGColorSpaceSRGB);
-  const ctx = $.CGBitmapContextCreate(null, w, h, 8, 0, cs, o.alpha ? 1 : 5);
+  // gray: greyscale; p3: Display P3; depth16: 16 bits per channel
+  const cs = $.CGColorSpaceCreateWithName(o.gray ? $.kCGColorSpaceGenericGrayGamma2_2 : o.p3 ? $.kCGColorSpaceDisplayP3 : $.kCGColorSpaceSRGB);
+  const ctx = $.CGBitmapContextCreate(null, w, h, o.depth16 ? 16 : 8, 0, cs, o.gray ? 0 : o.alpha ? 1 : 5);
   if (o.plain) {
     $.CGContextSetRGBFillColor(ctx, 0.5, 0.5, 0.5, 1);
     $.CGContextFillRect(ctx, $.CGRectMake(0, 0, w, h));
@@ -81,6 +83,7 @@ function probe(path, points) {
     width: props.PixelWidth, height: props.PixelHeight,
     orientation: props.Orientation || 1,
     hasAlpha: !!props.HasAlpha,
+    depth: props.Depth, model: props.ColorModel, profile: props.ProfileName || null,
     gps: !!props["{GPS}"],
     exif: props["{Exif}"] || {},
     tiff: props["{TIFF}"] || {},

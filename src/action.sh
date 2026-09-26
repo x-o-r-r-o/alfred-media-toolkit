@@ -6,10 +6,15 @@
 cd "$(dirname "$0")" || exit 1
 cache="${alfred_workflow_cache:-${TMPDIR:-/tmp}/media-toolkit}"
 op="${mt_op:-$1}"
+# osascript errors are kept for the log action; keep the file small
+errors="$cache/errors.log"
+if [ -f "$errors" ] && [ "$(stat -f %z "$errors")" -gt 1000000 ]; then
+  tail -c 200000 "$errors" >"$errors.tmp" && mv -f "$errors.tmp" "$errors"
+fi
 
 case "$op" in
   copy)
-    printf '%s' "$1" | /usr/bin/pbcopy
+    if [ -n "$MT_TEST_CLIPBOARD_FILE" ]; then printf '%s' "$1" >"$MT_TEST_CLIPBOARD_FILE"; else printf '%s' "$1" | /usr/bin/pbcopy; fi
     echo "Copied “$1”: paste it into Terminal"
     ;;
   cancel)
@@ -22,13 +27,13 @@ case "$op" in
     ;;
   resize:* | convert:* | rotate:* | flip:* | strip:* | optimize | removebg | removebg:*)
     mkdir -p "$cache"
-    msg=$(/usr/bin/osascript -l JavaScript ./media.js apply "$op" 2>>"$cache/errors.log")
-    echo "${msg:-Media Toolkit failed: see $cache/errors.log}"
+    msg=$(/usr/bin/osascript -l JavaScript ./media.js apply "$op" 2>>"$errors")
+    echo "${msg:-Media Toolkit failed: see $errors}"
     ;;
   mp4 | hevc | webm | mov | gif | compress:* | scale:* | mute | mp3 | m4a | wav | flac | aiff | trim:*)
     mkdir -p "$cache"
-    msg=$(/usr/bin/osascript -l JavaScript ./media.js enqueue "$op" 2>>"$cache/errors.log")
-    msg="${msg:-Media Toolkit failed: see $cache/errors.log}"
+    msg=$(/usr/bin/osascript -l JavaScript ./media.js enqueue "$op" 2>>"$errors")
+    msg="${msg:-Media Toolkit failed: see $errors}"
     case "$msg" in
       Queued*)
         if [ -n "$MT_TEST_WORKER_FOREGROUND" ]; then

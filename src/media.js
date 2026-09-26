@@ -171,6 +171,23 @@ function dict(obj) {
 function plain(obj) {
   return { __plain: obj };
 }
+// JXA never releases what CoreFoundation "Create"/"Copy" functions return: a batch of 12 MP photos grew to
+// gigabytes. Such objects are registered with own() and released with releaseOwned() after each file.
+let owned = [];
+let cfReleaseBound = false;
+function own(ref) {
+  if (ref) owned.push(ref);
+  return ref;
+}
+function releaseOwned() {
+  if (!cfReleaseBound) {
+    ObjC.bindFunction("CFRelease", ["void", ["void *"]]);
+    cfReleaseBound = true;
+  }
+  const list = owned;
+  owned = [];
+  for (const r of list) $.CFRelease(r);
+}
 function cfToJS(ref) {
   if (!ref) return null;
   const o = ObjC.castRefToObject(ref);
@@ -229,11 +246,15 @@ function srcCount(src) {
 }
 
 const MAX_PIXELS = Number(env("MT_TEST_MAX_PIXELS", "")) || 400e6; // refuse full decodes above 400 megapixels (about 1.6 GB of memory)
+// 16-bit images take twice the memory per pixel
+function pixelLimit(info) {
+  return info && info.deep ? MAX_PIXELS / 2 : MAX_PIXELS;
+}
 
 function openImage(path) {
-  const src = $.CGImageSourceCreateWithURL($.NSURL.fileURLWithPath(path), null);
+  const src = own($.CGImageSourceCreateWithURL($.NSURL.fileURLWithPath(path), null));
   if (!src || srcCount(src) < 1) throw new Error("not a readable image");
-  const props = cfToJS($.CGImageSourceCopyPropertiesAtIndex(src, 0, null)) || {};
+  const props = cfToJS(own($.CGImageSourceCopyPropertiesAtIndex(src, 0, null))) || {};
   const count = srcCount(src);
   const uti = ObjC.castRefToObject($.CGImageSourceGetType(src)).js;
   const w = props.PixelWidth || 0, h = props.PixelHeight || 0;
@@ -246,29 +267,31 @@ function openImage(path) {
     height: rotated ? w : h,
     orientation,
     hasAlpha: !!props.HasAlpha,
+    deep: (props.Depth || 8) > 8, // 16-bit or float: twice the memory per pixel
     animated: count > 1 && (uti === "com.compuserve.gif" || uti === "public.png" || uti === "public.heics" || uti === "org.webmproject.webp"),
   };
 }
 
 // Decode frame `i` with its orientation applied, optionally downscaled so the longest side is <= maxSide.
 function orientedFrame(info, i, maxSide) {
+  const MAX_PIXELS = pixelLimit(info);
   const full = Math.max(info.width, info.height);
   const target = maxSide ? Math.min(full, Math.max(1, Math.round(maxSide))) : full;
   if (!maxSide && info.orientation === 1) {
     if (info.width * info.height > MAX_PIXELS) throw new Error(`image too large (${Math.round((info.width * info.height) / 1e6)} MP)`);
-    const img = $.CGImageSourceCreateImageAtIndex(info.src, i, dict({ kCGImageSourceShouldCacheImmediately: true }));
+    const img = own($.CGImageSourceCreateImageAtIndex(info.src, i, dict({ kCGImageSourceShouldCacheImmediately: true })));
     if (!img) throw new Error("could not decode the image");
     return img;
   }
   const scale = target / full;
   const area = info.width * info.height * scale * scale;
   if (area > MAX_PIXELS) throw new Error(`image too large (${Math.round(area / 1e6)} MP)`);
-  const img = $.CGImageSourceCreateThumbnailAtIndex(info.src, i, dict({
+  const img = own($.CGImageSourceCreateThumbnailAtIndex(info.src, i, dict({
     kCGImageSourceCreateThumbnailFromImageAlways: true,
     kCGImageSourceCreateThumbnailWithTransform: true,
     kCGImageSourceShouldCacheImmediately: true,
     kCGImageSourceThumbnailMaxPixelSize: target,
-  }));
+  })));
   if (!img) throw new Error("could not decode the image");
   return img;
 }
@@ -281,14 +304,27 @@ function imageHasAlpha(img) {
 // Draw `img` into a new bitmap of outW×outH, applying rotation (clockwise degrees), flips, scaling and flattening.
 function draw(img, outW, outH, t = {}) {
   const alpha = imageHasAlpha(img) && !t.flatten;
-  let cs = $.CGImageGetColorSpace(img);
-  // Only RGB colour spaces can back an 8-bit RGBA context; anything else (grey, CMYK, indexed) goes to sRGB.
-  if (!cs || $.CGColorSpaceGetModel(cs) !== 1 /* kCGColorSpaceModelRGB */) cs = $.CGColorSpaceCreateWithName($.kCGColorSpaceSRGB);
-  let ctx = $.CGBitmapContextCreate(null, outW, outH, 8, 0, cs, alpha ? 1 /* premultipliedLast */ : 5 /* noneSkipLast */);
-  if (!ctx) ctx = $.CGBitmapContextCreate(null, outW, outH, 8, 0, $.CGColorSpaceCreateWithName($.kCGColorSpaceSRGB), alpha ? 1 : 5);
+  const srcCS = $.CGImageGetColorSpace(img);
+  const model = srcCS ? $.CGColorSpaceGetModel(srcCS) : -1;
+  // 16-bit (and float) sources keep 16 bits per channel unless that would take too much memory
+  const deep = Number($.CGImageGetBitsPerComponent(img)) > 8 && outW * outH <= MAX_PIXELS / 4;
+  const bpc = deep ? 16 : 8;
+  let ctx = null;
+  if (model === 0 /* monochrome */ && !alpha) {
+    // Greyscale stays greyscale (there is no grey + alpha bitmap context, so grey with alpha becomes RGB)
+    ctx = own($.CGBitmapContextCreate(null, outW, outH, bpc, 0, srcCS, 0 /* alpha none */));
+  }
+  if (!ctx) {
+    // RGB colour spaces (sRGB, Display P3, Adobe RGB…) keep their ICC profile; CMYK, Lab and indexed go to sRGB
+    const cs = model === 1 /* RGB */ ? srcCS : own($.CGColorSpaceCreateWithName($.kCGColorSpaceSRGB));
+    const info = alpha ? 1 /* premultipliedLast */ : 5 /* noneSkipLast */;
+    ctx = own($.CGBitmapContextCreate(null, outW, outH, bpc, 0, cs, info));
+    if (!ctx && bpc === 16) ctx = own($.CGBitmapContextCreate(null, outW, outH, 8, 0, cs, info));
+    if (!ctx) ctx = own($.CGBitmapContextCreate(null, outW, outH, 8, 0, own($.CGColorSpaceCreateWithName($.kCGColorSpaceSRGB)), info));
+  }
   if (!ctx) throw new Error("not enough memory for this image");
   if (t.flatten || !alpha) {
-    $.CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
+    $.CGContextSetGrayFillColor(ctx, 1, 1); // white in any colour space
     $.CGContextFillRect(ctx, $.CGRectMake(0, 0, outW, outH));
   }
   $.CGContextSetInterpolationQuality(ctx, 3 /* high */);
@@ -315,7 +351,7 @@ function draw(img, outW, outH, t = {}) {
     $.CGContextScaleCTM(ctx, 1, -1);
   }
   $.CGContextDrawImage(ctx, $.CGRectMake(0, 0, dw, dh), img);
-  const out = $.CGBitmapContextCreateImage(ctx);
+  const out = own($.CGBitmapContextCreateImage(ctx));
   if (!out) throw new Error("could not render the image");
   return out;
 }
@@ -324,7 +360,7 @@ function draw(img, outW, outH, t = {}) {
 function carriedProps(info, i, fmt, stripAll) {
   const d = $.NSMutableDictionary.dictionary;
   if (!stripAll) {
-    const ref = $.CGImageSourceCopyPropertiesAtIndex(info.src, i, null);
+    const ref = own($.CGImageSourceCopyPropertiesAtIndex(info.src, i, null));
     if (ref) {
       const src = ObjC.castRefToObject(ref);
       const keys = ObjC.deepUnwrap(src.allKeys) || [];
@@ -346,13 +382,22 @@ function carriedProps(info, i, fmt, stripAll) {
   return d;
 }
 
+// Every page of a multi-page file has the size and orientation of the first
+function samePageSize(info) {
+  for (let i = 1; i < info.count; i++) {
+    const p = cfToJS(own($.CGImageSourceCopyPropertiesAtIndex(info.src, i, null))) || {};
+    if (p.PixelWidth !== info.props.PixelWidth || p.PixelHeight !== info.props.PixelHeight || (p.Orientation || 1) !== info.orientation) return false;
+  }
+  return true;
+}
+
 function loopCount(info) {
-  const fp = cfToJS($.CGImageSourceCopyProperties(info.src, null)) || {};
+  const fp = cfToJS(own($.CGImageSourceCopyProperties(info.src, null))) || {};
   return (fp["{GIF}"] && fp["{GIF}"].LoopCount) || 0;
 }
 
 function gifFrameProps(info, i) {
-  const p = cfToJS($.CGImageSourceCopyPropertiesAtIndex(info.src, i, null)) || {};
+  const p = cfToJS(own($.CGImageSourceCopyPropertiesAtIndex(info.src, i, null))) || {};
   const g = p["{GIF}"] || p["{PNG}"] || p["{HEICS}"] || p["{WebP}"] || {};
   const delay = g.UnclampedDelayTime || g.DelayTime || 0.1;
   return plain({ DelayTime: delay, UnclampedDelayTime: delay });
@@ -361,7 +406,7 @@ function gifFrameProps(info, i) {
 // Write frames to `path` as `fmtKey`. frames: [{ img, props: NSDictionary }]
 function writeFrames(path, fmtKey, frames, fileProps) {
   const fmt = FORMATS[fmtKey];
-  const dest = $.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(path), $(fmt.uti), frames.length, null);
+  const dest = own($.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(path), $(fmt.uti), frames.length, null));
   if (!dest) throw new Error(`can't write ${fmt.name} here`);
   if (fileProps) $.CGImageDestinationSetProperties(dest, fileProps);
   for (const f of frames) $.CGImageDestinationAddImage(dest, f.img, f.props);
@@ -418,26 +463,28 @@ function processImage(path, op) {
   if (plan.note) notes.push(plan.note);
   const tmp = tempPathFor(plan.path);
 
-  // Which frames to keep: all when both sides are animated GIFs, otherwise the first
+  // Which frames to keep: all when both sides are animated GIFs, all pages of a multi-page TIFF saved as TIFF
+  // (when they share one size), otherwise the first
   const keepAnim = info.animated && fmt.frames;
-  const frameCount = keepAnim ? info.count : 1;
-  if (info.animated && !keepAnim) notes.push("first frame only");
+  const keepPages = !info.animated && info.count > 1 && fmtKey === "tiff" && (kind === "optimize" || samePageSize(info));
+  const frameCount = keepAnim || keepPages ? info.count : 1;
+  if (info.count > 1 && frameCount === 1) notes.push(info.animated ? "first frame only" : "first page only");
   const flatten = info.hasAlpha && !fmt.alpha;
   let detail = "";
 
   try {
     if (kind === "optimize" || (kind === "convert" && !flatten && info.orientation === 1 && !fmt.noOrientation)) {
       // Re-encode straight from the source: keeps metadata, orientation, colour profile and depth
-      const dest = $.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(tmp), $(fmt.uti), frameCount, null);
+      const dest = own($.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(tmp), $(fmt.uti), frameCount, null));
       if (!dest) throw new Error(`can't write ${fmt.name}`);
       if (keepAnim) $.CGImageDestinationSetProperties(dest, dict({ "{GIF}": plain({ LoopCount: loopCount(info) }) }));
       for (let i = 0; i < frameCount; i++) {
         if (kind === "optimize") {
           // ImageIO copies JPEG data untouched when the format doesn't change, so decode and encode again,
           // with every property (orientation, EXIF, GIF frame delays) carried over as it was
-          const img = $.CGImageSourceCreateImageAtIndex(info.src, i, null);
+          const img = own($.CGImageSourceCreateImageAtIndex(info.src, i, null));
           if (!img) throw new Error("could not decode the image");
-          const props = ObjC.castRefToObject($.CGImageSourceCopyPropertiesAtIndex(info.src, i, null)).mutableCopy;
+          const props = ObjC.castRefToObject(own($.CGImageSourceCopyPropertiesAtIndex(info.src, i, null))).mutableCopy;
           if (fmt.lossy) props.setObjectForKey(num(quality()), $("kCGImageDestinationLossyCompressionQuality"));
           $.CGImageDestinationAddImage(dest, img, props);
         } else {
@@ -472,7 +519,7 @@ function processImage(path, op) {
       } else if (kind !== "convert") {
         throw new Error(`unknown operation ${kind}`);
       }
-      if (!maxSide && tw * th > MAX_PIXELS) throw new Error(`image too large (${Math.round((tw * th) / 1e6)} MP)`);
+      if (!maxSide && tw * th > pixelLimit(info)) throw new Error(`image too large (${Math.round((tw * th) / 1e6)} MP)`);
       const frames = [];
       for (let i = 0; i < frameCount; i++) {
         let img = orientedFrame(info, i, maxSide);
@@ -521,14 +568,14 @@ function stripMetadata(info, srcFmt, gpsOnly) {
   let ok = false;
   try {
     if (fmtKey === srcFmt && info.count === 1) {
-      const dest = $.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(tmp), $.CGImageSourceGetType(info.src), 1, null);
+      const dest = own($.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(tmp), $.CGImageSourceGetType(info.src), 1, null));
       const opts = $.NSMutableDictionary.dictionary;
       let meta;
       if (gpsOnly) {
-        meta = $.CGImageSourceCopyMetadataAtIndex(info.src, 0, null) || $.CGImageMetadataCreateMutable();
+        meta = own($.CGImageSourceCopyMetadataAtIndex(info.src, 0, null)) || own($.CGImageMetadataCreateMutable());
         opts.setObjectForKey(bool(true), $("kCGImageMetadataShouldExcludeGPS"));
       } else {
-        meta = $.CGImageMetadataCreateMutable();
+        meta = own($.CGImageMetadataCreateMutable());
         if (info.orientation !== 1) $.CGImageMetadataSetValueMatchingImageProperty(meta, $("{TIFF}"), $("Orientation"), num(info.orientation));
       }
       opts.setObjectForKey(ObjC.castRefToObject(meta), $("kCGImageDestinationMetadata"));
@@ -540,16 +587,17 @@ function stripMetadata(info, srcFmt, gpsOnly) {
       // Re-encode: orientation is baked into the pixels, nothing else is carried over except (for GPS-only) the rest
       FM.removeItemAtPathError(tmp, $());
       const frames = [];
-      const n = info.animated && fmt.frames ? info.count : 1;
+      const n = (info.animated && fmt.frames) || (!info.animated && fmtKey === "tiff") ? info.count : 1;
+      if (info.count > 1 && n === 1) notes.push(info.animated ? "first frame only" : "first page only");
       for (let i = 0; i < n; i++) {
         let img = orientedFrame(info, i, null);
         if (info.hasAlpha && !fmt.alpha) img = draw(img, imgW(img), imgH(img), { flatten: true });
         let props = carriedProps(info, i, fmt, !gpsOnly);
         if (gpsOnly) props.removeObjectForKey("{GPS}");
-        if (n > 1) props = dict({ "{GIF}": gifFrameProps(info, i) });
+        if (n > 1 && info.animated) props = dict({ "{GIF}": gifFrameProps(info, i) });
         frames.push({ img, props });
       }
-      writeFrames(tmp, fmtKey, frames, n > 1 ? dict({ "{GIF}": plain({ LoopCount: loopCount(info) }) }) : null);
+      writeFrames(tmp, fmtKey, frames, n > 1 && info.animated ? dict({ "{GIF}": plain({ LoopCount: loopCount(info) }) }) : null);
     }
   } catch (e) {
     FM.removeItemAtPathError(tmp, $());
@@ -560,20 +608,21 @@ function stripMetadata(info, srcFmt, gpsOnly) {
 }
 
 function hasGPS(path) {
-  const s = $.CGImageSourceCreateWithURL($.NSURL.fileURLWithPath(path), null);
-  const p = (s && cfToJS($.CGImageSourceCopyPropertiesAtIndex(s, 0, null))) || {};
+  const s = own($.CGImageSourceCreateWithURL($.NSURL.fileURLWithPath(path), null));
+  const p = (s && cfToJS(own($.CGImageSourceCopyPropertiesAtIndex(s, 0, null)))) || {};
   return !!p["{GPS}"];
 }
 
 function hasPrivateMetadata(path) {
-  const s = $.CGImageSourceCreateWithURL($.NSURL.fileURLWithPath(path), null);
-  const p = cfToJS($.CGImageSourceCopyPropertiesAtIndex(s, 0, null)) || {};
+  const s = own($.CGImageSourceCreateWithURL($.NSURL.fileURLWithPath(path), null));
+  const p = cfToJS(own($.CGImageSourceCopyPropertiesAtIndex(s, 0, null))) || {};
   const exif = p["{Exif}"] || {};
   const tiff = p["{TIFF}"] || {};
   return !!(p["{GPS}"] || exif.DateTimeOriginal || exif.UserComment || exif.LensModel || exif.BodySerialNumber || tiff.Make || tiff.Model || tiff.Artist || p["{IPTC}"]);
 }
 
 // Offline background removal with Vision (macOS 14+): foreground instance mask → transparent PNG.
+let ciContext = null;
 function removeBackground(info, crop) {
   if (!backgroundRemovalAvailable()) throw new Error("background removal needs macOS 14 or later");
   const plan = plannedOutput(info.path, "png", { neverReplace: true });
@@ -590,16 +639,22 @@ function removeBackground(info, crop) {
   const buf = obs.generateMaskedImageOfInstancesFromRequestHandlerCroppedToInstancesExtentError(obs.allInstances, handler, crop, Ref());
   if (!buf) throw new Error("could not build the mask");
   const ci = $.CIImage.imageWithCVPixelBuffer(buf);
-  const ctx = $.CIContext.contextWithOptions($());
+  if (!ciContext) ciContext = $.CIContext.contextWithOptions($()); // one per run: creating it is slow
+  const ctx = ciContext;
+  // Keep the photo's own RGB colour space (Display P3 from iPhones, Adobe RGB…) and 16-bit depth;
+  // grey, CMYK and other models are written as sRGB
+  const cs = $.CGImageGetColorSpace(img);
+  const outCS = cs && $.CGColorSpaceGetModel(cs) === 1 ? cs : own($.CGColorSpaceCreateWithName($.kCGColorSpaceSRGB));
+  const format = Number($.CGImageGetBitsPerComponent(img)) > 8 ? $.kCIFormatRGBA16 : $.kCIFormatRGBA8;
   const ok = ctx.writePNGRepresentationOfImageToURLFormatColorSpaceOptionsError(
-    ci, $.NSURL.fileURLWithPath(tmp), $.kCIFormatRGBA8, $.CGColorSpaceCreateWithName($.kCGColorSpaceSRGB), $(), Ref());
+    ci, $.NSURL.fileURLWithPath(tmp), format, outCS, $(), Ref());
   if (!ok) {
     FM.removeItemAtPathError(tmp, $());
     throw new Error("could not write the PNG");
   }
   const out = commit(tmp, plan);
   const ext = ci.extent;
-  const note = [plan.note, info.animated ? "first frame only" : ""].filter(Boolean).join(", ");
+  const note = [plan.note, info.count > 1 ? (info.animated ? "first frame only" : "first page only") : ""].filter(Boolean).join(", ");
   return { out, detail: `${Math.round(ext.size.width)}×${Math.round(ext.size.height)}, transparent PNG`, note };
 }
 
@@ -652,13 +707,36 @@ function filesFromEnv(name = "mt_files") {
   }
 }
 
+// Files per osascript process. JXA keeps what Vision and Core Image return until the process ends (about
+// 50 MB per 12 MP photo; autorelease pools can't be drained from JXA), so big batches run in chunks, each in
+// a fresh process. A crash on one broken file also only loses its chunk.
+const CHUNK = Number(env("MT_TEST_CHUNK", "")) || 10;
+
 function applyImages(op) {
   const files = filesFromEnv();
   if (!files.length) return "No files to process";
   const kind = op.split(":")[0];
   const [verb] = OP_VERBS[kind] || ["Processed"];
-  const done = [], failed = [], skipped = [], notes = new Set();
+  if (env("MT_CHUNK", "") === "1") return JSON.stringify(processFiles(files, op));
   if (files.length >= 10) notifyAlfred(`Processing ${files.length} images…`);
+  let res;
+  if (files.length <= CHUNK) res = processFiles(files, op);
+  else {
+    res = { done: [], failed: [], skipped: [], notes: [] };
+    for (let i = 0; i < files.length; i += CHUNK) {
+      const r = runChunk(files.slice(i, i + CHUNK), op);
+      for (const k of Object.keys(res)) res[k].push(...r[k]);
+    }
+  }
+  const { done, failed, skipped } = res;
+  appendLog(`${new Date().toISOString()} ${op}: ${done.length} ok, ${skipped.length} skipped, ${failed.length} failed` +
+    failed.map(([f, m]) => `\n  ${f}: ${m}`).join(""));
+  if (env("mt_reveal", "0") === "1" && done.length) reveal(done.map(([, r]) => r.out));
+  return summary(verb, done, failed, skipped, new Set(res.notes));
+}
+
+function processFiles(files, op) {
+  const done = [], failed = [], skipped = [], notes = new Set();
   for (const f of files) {
     try {
       if (!exists(f)) throw new Error("file not found");
@@ -671,12 +749,40 @@ function applyImages(op) {
       }
     } catch (e) {
       failed.push([f, e && e.message ? e.message : String(e)]);
+    } finally {
+      releaseOwned();
     }
   }
-  appendLog(`${new Date().toISOString()} ${op}: ${done.length} ok, ${skipped.length} skipped, ${failed.length} failed` +
-    failed.map(([f, m]) => `\n  ${f}: ${m}`).join(""));
-  if (env("mt_reveal", "0") === "1" && done.length) reveal(done.map(([, r]) => r.out));
-  return summary(verb, done, failed, skipped, notes);
+  return { done, failed, skipped, notes: [...notes] };
+}
+
+// Process `files` in a child osascript running this same script, and return its results
+function runChunk(files, op) {
+  const args = ObjC.deepUnwrap($.NSProcessInfo.processInfo.arguments);
+  let script = args.find((a) => /(^|\/)media\.js$/.test(a));
+  if (!script) return processFiles(files, op);
+  if (!script.startsWith("/")) script = `${FM.currentDirectoryPath.js}/${script}`;
+  const t = $.NSTask.alloc.init;
+  t.executableURL = $.NSURL.fileURLWithPath("/usr/bin/osascript");
+  t.arguments = $(["-l", "JavaScript", script, "apply", op]);
+  const e = ENV.mutableCopy;
+  e.setObjectForKey($(JSON.stringify(files)), $("mt_files"));
+  e.setObjectForKey($("1"), $("MT_CHUNK"));
+  t.environment = e;
+  const p = $.NSPipe.pipe;
+  t.standardOutput = p;
+  t.standardError = $.NSFileHandle.fileHandleWithNullDevice;
+  const crashed = (why) => ({ done: [], failed: files.map((f) => [f, why]), skipped: [], notes: [] });
+  if (!t.launchAndReturnError($())) return crashed("could not start");
+  const d = p.fileHandleForReading.readDataToEndOfFile;
+  t.waitUntilExit;
+  try {
+    const r = JSON.parse($.NSString.alloc.initWithDataEncoding(d, $.NSUTF8StringEncoding).js);
+    if (r && Array.isArray(r.done)) return r;
+  } catch (err) {
+    // fall through
+  }
+  return crashed("the image engine crashed");
 }
 
 function summary(verb, done, failed, skipped, notes) {
@@ -754,19 +860,56 @@ function which(name) {
   }
   return null;
 }
+let appleSiliconCache = null;
 function isAppleSilicon() {
+  if (appleSiliconCache !== null) return appleSiliconCache;
   const t = env("MT_TEST_ARCH", "");
-  if (t) return t === "arm64";
+  if (t) return (appleSiliconCache = t === "arm64");
   const u = $.NSTask.alloc.init;
   u.executableURL = $.NSURL.fileURLWithPath("/usr/sbin/sysctl");
   u.arguments = $(["-n", "hw.optional.arm64"]);
   const p = $.NSPipe.pipe;
   u.standardOutput = p;
   u.standardError = $.NSFileHandle.fileHandleWithNullDevice;
-  if (!u.launchAndReturnError($())) return false;
+  if (!u.launchAndReturnError($())) return (appleSiliconCache = false);
   const d = p.fileHandleForReading.readDataToEndOfFile;
   u.waitUntilExit;
-  return $.NSString.alloc.initWithDataEncoding(d, $.NSUTF8StringEncoding).js.trim() === "1";
+  return (appleSiliconCache = $.NSString.alloc.initWithDataEncoding(d, $.NSUTF8StringEncoding).js.trim() === "1");
+}
+
+// The CPU architectures of a Mach-O executable (["arm64"], ["x86_64"], both for a universal binary),
+// or null when it can't be told (a wrapper script, unreadable). Reads only the header.
+function machOArchs(path) {
+  const real = $(path).stringByResolvingSymlinksInPath.js;
+  const h = $.NSFileHandle.fileHandleForReadingAtPath(real);
+  if (h.isNil()) return null;
+  const data = h.readDataOfLength(4096);
+  h.closeFile;
+  const str = $.NSString.alloc.initWithDataEncoding(data, $.NSISOLatin1StringEncoding);
+  if (str.isNil()) return null;
+  const b = str.js;
+  const be = (o) => ((b.charCodeAt(o) << 24) | (b.charCodeAt(o + 1) << 16) | (b.charCodeAt(o + 2) << 8) | b.charCodeAt(o + 3)) >>> 0;
+  const le = (o) => ((b.charCodeAt(o + 3) << 24) | (b.charCodeAt(o + 2) << 16) | (b.charCodeAt(o + 1) << 8) | b.charCodeAt(o)) >>> 0;
+  const name = (cpu) => (cpu === 0x0100000c ? "arm64" : cpu === 0x01000007 ? "x86_64" : "other");
+  if (b.length < 8) return null;
+  if (be(0) === 0xcafebabe || be(0) === 0xcafebabf) {
+    // universal binary: big-endian fat header, 20 (or 32 for fat64) bytes per architecture
+    const n = be(4), size = be(0) === 0xcafebabf ? 32 : 20;
+    const out = [];
+    for (let i = 0; i < n && 8 + i * size + 4 <= b.length; i++) out.push(name(be(8 + i * size)));
+    return out.length ? out : null;
+  }
+  if (le(0) === 0xfeedfacf || le(0) === 0xfeedface) return [name(le(4))];
+  return null;
+}
+
+// Constant-quality VideoToolbox encoding (-q:v) exists only in ffmpeg builds for arm64: an Intel ffmpeg
+// (an old /usr/local Homebrew under Rosetta) fails with "-q:v qscale not available for encoder".
+function ffmpegRunsNative(ffmpeg) {
+  const t = env("MT_TEST_FFMPEG_ARCHS", "");
+  const archs = t ? t.split(",") : machOArchs(ffmpeg);
+  if (!isAppleSilicon()) return false;
+  return archs === null ? true : archs.includes("arm64");
 }
 
 // Operation catalogue for video and audio. `needs`: "ffmpeg" or a fallback tool per kind.
@@ -841,53 +984,73 @@ function outputExtFor(opId, src, kind, tool) {
   return e;
 }
 
-function vtArgs(codec) {
+function vtArgs(codec, ffmpeg) {
   const hevc = codec === "hevc";
-  const a = ["-c:v", hevc ? "hevc_videotoolbox" : "h264_videotoolbox"];
-  // Constant-quality mode is only available on Apple Silicon; Intel Macs get a generous bitrate instead
-  if (isAppleSilicon()) a.push("-q:v", hevc ? "60" : "65");
+  // allow_sw: fall back to Apple's software encoder when there is no hardware encoder for the codec (older
+  // Intel Macs have no HEVC encoder) instead of failing with "cannot create compression session"
+  const a = ["-c:v", hevc ? "hevc_videotoolbox" : "h264_videotoolbox", "-allow_sw", "1"];
+  if (ffmpegRunsNative(ffmpeg)) a.push("-q:v", hevc ? "60" : "65");
   else a.push("-b:v", hevc ? "5M" : "8M");
+  // HEVC keeps 10-bit sources (HDR from iPhones) in 10 bits (Main 10) through the "format" filter below;
+  // H.264 is always 8-bit 4:2:0, the only kind every player decodes
   if (hevc) a.push("-tag:v", "hvc1");
-  a.push("-pix_fmt", "yuv420p");
+  else a.push("-pix_fmt", "yuv420p");
   return a;
 }
+
+// Separates the two ffmpeg runs of a job (palette, then GIF) in the job file; never a real argument
+const THEN = "::then::";
 
 // Build the argv that converts `src` into `tmp`.
 function buildCommand(tool, opId, src, tmp, kind, progress, trim) {
   const [base, arg] = opId.split(":");
   if (tool === "ffmpeg") {
     const ff = which("ffmpeg");
-    const pre = [ff, "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", progress, "-nostats"];
+    const head = [ff, "-hide_banner", "-nostdin", "-y", "-loglevel", "error"];
+    const pre = [...head, "-progress", progress, "-nostats"];
     const inp = [];
+    // -ss before -i seeks the input; when re-encoding, ffmpeg decodes from the previous keyframe and drops the
+    // frames before the start, so the cut is frame-accurate. -t after -i is the length of the output.
     if (trim) inp.push("-ss", String(trim.start));
     inp.push("-i", "file:" + src);
     if (trim && trim.end !== null) inp.push("-t", String(trim.end - trim.start));
     const out = "file:" + tmp;
     const aac = ["-c:a", "aac", "-b:a", "192k"];
-    // First video stream and every audio stream; subtitles and data streams are left out because MP4/WebM
-    // can't take most of them (bitmap subtitles from MKV would fail the whole conversion)
-    const vmap = ["-map", "0:v:0", "-map", "0:a?", "-sn", "-dn"];
+    // The first real video stream (V: not cover art) and every audio stream; subtitles and data streams are left
+    // out because MP4/WebM can't take most of them (bitmap subtitles from MKV would fail the whole conversion)
+    const vmap = ["-map", "0:V:0", "-map", "0:a?", "-sn", "-dn"];
     const fast = ["-movflags", "+faststart"];
+    // H.264/HEVC 4:2:0 need even dimensions
     const even = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+    const hevcVf = `${even},format=yuv420p|p010le`; // 8-bit stays 8-bit, 10-bit stays 10-bit
     switch (base) {
-      case "mp4": return [...pre, ...inp, ...vmap, ...vtArgs("h264"), "-vf", even, ...aac, ...fast, out];
-      case "hevc": return [...pre, ...inp, ...vmap, ...vtArgs("hevc"), "-vf", even, ...aac, ...fast, out];
-      case "mov": return [...pre, ...inp, ...vmap, ...vtArgs("h264"), "-vf", even, ...aac, out];
-      case "webm": return [...pre, ...inp, ...vmap, "-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-c:a", "libopus", "-b:a", "128k", out];
+      case "mp4": return [...pre, ...inp, ...vmap, ...vtArgs("h264", ff), "-vf", even, ...aac, ...fast, out];
+      case "hevc": return [...pre, ...inp, ...vmap, ...vtArgs("hevc", ff), "-vf", hevcVf, ...aac, ...fast, out];
+      case "mov": return [...pre, ...inp, ...vmap, ...vtArgs("h264", ff), "-vf", even, ...aac, out];
+      // yuv420p: browsers only play 8-bit 4:2:0 VP9 reliably. -ac 2: libopus rejects the common 5.1(side)
+      // layout of AC-3/DTS tracks ("Invalid channel layout 5.1(side)"), and stereo suits the web anyway.
+      case "webm": return [...pre, ...inp, ...vmap, "-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-pix_fmt", "yuv420p", "-c:a", "libopus", "-b:a", "128k", "-ac", "2", out];
       case "gif": {
-        // only the video stream: -an keeps attached audio out
+        // Two runs with a palette file in between: a one-pass split/palettegen/paletteuse graph keeps every
+        // frame in memory until the end of the video (gigabytes for a few minutes of 1080p)
         const w = parseInt(env("gif_width", "480"), 10);
         const fps = parseInt(env("gif_fps", "15"), 10) || 15;
         const scale = w > 0 ? `,scale=w='min(${w},iw)':h=-1:flags=lanczos` : "";
-        return [...pre, ...inp, "-map", "0:v:0", "-an", "-sn", "-vf", `fps=${fps}${scale},split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`, "-loop", "0", out];
+        const palette = `${tmp}-aux-palette.png`;
+        return [
+          ...head, ...inp, "-map", "0:V:0", "-an", "-sn", "-dn", "-vf", `fps=${fps}${scale},palettegen=stats_mode=diff`, "-frames:v", "1", "-update", "1", "file:" + palette,
+          THEN,
+          ...pre, ...inp, "-i", "file:" + palette, "-filter_complex", `[0:V:0]fps=${fps}${scale}[v];[v][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`,
+          "-an", "-sn", "-dn", "-loop", "0", out,
+        ];
       }
       case "compress": return [...pre, ...inp, ...vmap, "-c:v", "libx264", "-crf", arg, "-preset", "medium", "-pix_fmt", "yuv420p", "-vf", even, "-c:a", "aac", "-b:a", "128k", ...fast, out];
       case "scale": {
         const n = parseInt(arg, 10);
         const vf = `scale=w='if(gte(iw,ih),-2,trunc(min(${n},iw)/2)*2)':h='if(gte(iw,ih),trunc(min(${n},ih)/2)*2,-2)'`;
-        return [...pre, ...inp, ...vmap, ...vtArgs("h264"), "-vf", vf, ...aac, ...fast, out];
+        return [...pre, ...inp, ...vmap, ...vtArgs("h264", ff), "-vf", vf, ...aac, ...fast, out];
       }
-      case "mute": return [...pre, ...inp, "-map", "0:v", "-map", "0:s?", "-c", "copy", "-an", out];
+      case "mute": return [...pre, ...inp, "-map", "0:V", "-map", "0:s?", "-c", "copy", "-an", out];
       case "mp3": return [...pre, ...inp, "-vn", "-map", "0:a:0", "-c:a", "libmp3lame", "-q:a", "2", out];
       case "m4a": return [...pre, ...inp, "-vn", "-map", "0:a:0", ...aac, out];
       case "wav": return [...pre, ...inp, "-vn", "-map", "0:a:0", "-c:a", "pcm_s16le", out];
@@ -898,15 +1061,17 @@ function buildCommand(tool, opId, src, tmp, kind, progress, trim) {
           const codec = { mp3: ["-c:a", "libmp3lame", "-q:a", "2"], wav: ["-c:a", "pcm_s16le"], flac: ["-c:a", "flac"], aiff: ["-c:a", "pcm_s16be"], aif: ["-c:a", "pcm_s16be"] }[extOf(tmp)] || aac;
           return [...pre, ...inp, "-vn", "-map", "0:a:0", ...codec, out];
         }
-        return [...pre, ...inp, ...vmap, ...vtArgs("h264"), "-vf", even, ...aac, ...fast, out];
+        return [...pre, ...inp, ...vmap, ...vtArgs("h264", ff), "-vf", even, ...aac, ...fast, out];
       }
     }
+    return null;
   }
   if (tool === "avconvert") {
     const preset = {
       mp4: "PresetHighestQuality", mov: "PresetHighestQuality", hevc: "PresetHEVCHighestQuality", m4a: "PresetAppleM4A",
-      scale: { 1080: "Preset1920x1080", 720: "Preset1280x720", 480: "Preset640x480" }[arg], trim: kind === "audio" ? "PresetAppleM4A" : "PresetHighestQuality",
+      scale: AVCONVERT_SCALE[arg], trim: kind === "audio" ? "PresetAppleM4A" : "PresetHighestQuality",
     }[base];
+    if (!preset) return null;
     const a = ["/usr/bin/avconvert", "--source", src, "--preset", preset, "--output", tmp, "--progress"];
     if (trim) {
       a.push("--start", String(trim.start));
@@ -915,12 +1080,15 @@ function buildCommand(tool, opId, src, tmp, kind, progress, trim) {
     return a;
   }
   if (tool === "afconvert") {
-    // VBR AAC: a fixed bitrate fails for low sample rates and mono sources
-    const fmt = { m4a: ["-f", "m4af", "-d", "aac", "-s", "3", "-q", "127"], wav: ["-f", "WAVE", "-d", "LEI16"], flac: ["-f", "flac", "-d", "flac"], aiff: ["-f", "AIFF", "-d", "BEI16"] }[base];
+    // VBR AAC (a fixed bitrate fails for low sample rates and mono sources). vbrq 91 is about 192 kbit/s for
+    // stereo music, like the ffmpeg path; the default (64) is about 128 kbit/s.
+    const fmt = { m4a: ["-f", "m4af", "-d", "aac", "-s", "3", "-q", "127", "-ue", "vbrq", "91"], wav: ["-f", "WAVE", "-d", "LEI16"], flac: ["-f", "flac", "-d", "flac"], aiff: ["-f", "AIFF", "-d", "BEI16"] }[base];
+    if (!fmt) return null;
     return ["/usr/bin/afconvert", ...fmt, src, tmp];
   }
   return null;
 }
+const AVCONVERT_SCALE = { 1080: "Preset1920x1080", 720: "Preset1280x720", 480: "Preset640x480" };
 
 // Queue video/audio jobs for worker.sh. Each job file holds NUL-terminated fields:
 // batch, index, count, label, source, final path, temp path, replace (0/1), reveal (0/1), tool, argv…
@@ -930,6 +1098,10 @@ function enqueue(opId) {
   const ffmpeg = which("ffmpeg");
   const dir = `${cacheDir()}/queue`;
   FM.createDirectoryAtPathWithIntermediateDirectoriesAttributesError(dir, true, $(), $());
+  // Only operations the Script Filters offer: the id ends up in ffmpeg arguments
+  if (!/^(?:mp4|hevc|webm|mov|gif|mute|mp3|m4a|wav|flac|aiff|compress:(?:[1-4]\d|5[01])|scale:[1-9]\d{1,3}|trim:.*)$/.test(opId)) {
+    return { queued: 0, message: `Unknown operation: ${opId}` };
+  }
   const base = opId.split(":")[0];
   const trim = base === "trim" ? parseTrim(opId.slice(5).replace(/_/g, ":")) : null;
   if (base === "trim" && !trim) return { queued: 0, message: "Invalid trim range" };
@@ -952,6 +1124,10 @@ function enqueue(opId) {
     taken.push(plan.path);
     const tmp = tempPathFor(plan.path);
     const cmd = buildCommand(tool, opId, f, tmp, kind, `file:${cacheDir()}/progress.txt`, trim);
+    if (!cmd) {
+      failed.push(`${baseName(f)}: can't do this with ${tool}`);
+      continue;
+    }
     if (plan.note) notes.add(plan.note);
     jobs.push([baseName(f), f, plan.path, tmp, plan.replace ? "1" : "0", env("mt_reveal", "0") === "1" ? "1" : "0", tool, ...cmd]);
   }
@@ -973,6 +1149,17 @@ function enqueue(opId) {
 function readText(p) {
   const s = $.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, $());
   return s.isNil() ? null : s.js;
+}
+// The last `bytes` bytes of a file as text ("" when missing)
+function readTail(p, bytes) {
+  const h = $.NSFileHandle.fileHandleForReadingAtPath(p);
+  if (h.isNil()) return "";
+  const size = Number(h.seekToEndOfFile);
+  h.seekToFileOffset(Math.max(0, size - bytes));
+  const d = h.readDataToEndOfFile;
+  h.closeFile;
+  const s = $.NSString.alloc.initWithDataEncoding(d, $.NSISOLatin1StringEncoding); // never fails on a cut UTF-8 sequence
+  return s.isNil() ? "" : s.js;
 }
 let killBound = false;
 function processAlive(pid) {
@@ -1007,10 +1194,11 @@ function workerStatus() {
   const label = state[1] || "";
   const tool = state[2] || "";
   let pct = null;
-  const prog = readText(`${cache}/progress.txt`) || "";
+  // Only the end of the file: ffmpeg appends a block twice a second, megabytes for a long movie
+  const prog = readTail(`${cache}/progress.txt`, 4096);
   if (tool === "ffmpeg" && duration > 0) {
-    const m = prog.match(/out_time_(?:us|ms)=(\d+)(?![\s\S]*out_time_(?:us|ms)=)/);
-    if (m) pct = Math.min(99, Math.max(0, Math.round((parseInt(m[1], 10) / 1e6 / duration) * 100)));
+    const all = [...prog.matchAll(/out_time_(?:us|ms)=(\d+)/g)];
+    if (all.length) pct = Math.min(99, Math.max(0, Math.round((parseInt(all[all.length - 1][1], 10) / 1e6 / duration) * 100)));
   } else if (tool === "avconvert") {
     const all = [...prog.matchAll(/(\d+(?:\.\d+)?)%\s*complete/g)];
     if (all.length) pct = Math.min(99, Math.round(parseFloat(all[all.length - 1][1])));
@@ -1039,12 +1227,40 @@ function finderSelection() {
       return test.split("\t").filter(Boolean);
     }
   }
+  // One Apple Event for the whole selection: asking each item for its URL costs an event per file
+  // (seconds for a few hundred files)
+  const testScript = env("MT_TEST_SELECTION_SCRIPT", "");
+  const paths = aliasListPaths(testScript || 'tell application id "com.apple.finder" to return selection as alias list');
+  if (paths || testScript) return paths;
   try {
     const finder = Application("Finder");
     const sel = finder.selection();
     return sel.map((i) => $.NSURL.URLWithString(i.url()).path.js).filter(Boolean);
   } catch (e) {
     return null; // Finder not running or no Automation permission
+  }
+}
+
+// Run AppleScript `source` that returns a list of aliases, and return their paths (null on any error)
+function aliasListPaths(source) {
+  try {
+    const script = $.NSAppleScript.alloc.initWithSource($(source));
+    const d = script.executeAndReturnError(Ref());
+    if (!d || d.isNil()) return null;
+    const out = [];
+    const n = Number(d.numberOfItems);
+    for (let i = 1; i <= n; i++) {
+      // alias → 'furl' descriptor, whose data is the file URL in UTF-8 (the fileURL property isn't bridged)
+      const u = d.descriptorAtIndex(i).coerceToDescriptorType(0x6675726c /* 'furl' */);
+      if (!u || u.isNil()) return null;
+      const s = $.NSString.alloc.initWithDataEncoding(u.data, $.NSUTF8StringEncoding);
+      const url = s.isNil() ? null : $.NSURL.URLWithString(s);
+      if (!url || url.isNil()) return null;
+      out.push(url.path.js);
+    }
+    return out;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -1229,6 +1445,8 @@ function avItems(files, query) {
     const count = usable.length === 1 ? "" : ` (${usable.length} files)`;
     const tool = toolFor(op.id, kindOf(usable[0]), extOf(usable[0]), ffmpeg);
     const via = tool === "ffmpeg" ? "" : ` · via ${tool}`;
+    // avconvert's size presets fit the video in a box rather than capping the short side
+    if (tool === "avconvert" && op.id.startsWith("scale:")) sub = `Fits within ${AVCONVERT_SCALE[op.id.slice(6)].slice(6)}`;
     items.push(opItem(`${title}${count}`, `${sub}${via}`, op.id, usable, isAudioOp ? "audio" : op.id.split(":")[0]));
   }
   if (!q || "trim".startsWith(q.split(/\s+/)[0])) {

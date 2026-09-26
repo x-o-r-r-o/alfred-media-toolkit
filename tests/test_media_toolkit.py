@@ -4,7 +4,7 @@
 Images are made with CoreGraphics (tests/fixtures.js). Movies are made with AVFoundation (tests/avtool.swift)
 for the avconvert/afconvert paths, and with ffmpeg only if it is installed; the ffmpeg tests are skipped otherwise.
 """
-import json, os, plistlib, shutil, stat, subprocess, sys, tempfile, time, unittest, wave, struct, math
+import json, os, plistlib, unicodedata, shutil, stat, subprocess, sys, tempfile, time, unittest, wave, struct, math
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src")
@@ -800,7 +800,7 @@ class QueueTests(Base):
         open(mov, "w").close()
         _, jobs = self.job("mute", [mov], MT_TEST_FFMPEG="/f/ffmpeg")
         j = jobs[0]
-        self.assertEqual(j[j.index("-map") + 1], "0:v")  # regression: -map 0 failed on data streams
+        self.assertEqual(j[j.index("-map") + 1], "0:V")  # regression: -map 0 failed on data streams; V skips cover art
         self.assertIn("-an", j)
         self.assertTrue(j[j.index("-progress") + 1].startswith("file:"))
         fallback = os.path.join(self.dir, "Downloads")
@@ -818,7 +818,7 @@ class QueueTests(Base):
         for op in ("mp4", "hevc", "mov", "webm", "compress:23", "scale:720", "trim:0_01-0_02"):
             _, jobs = self.job(op, [mkv], MT_TEST_FFMPEG="/f/ffmpeg")
             j = jobs[0]
-            self.assertIn("0:v:0", j, op)  # bitmap subtitles in MKV used to fail MP4 conversions
+            self.assertIn("0:V:0", j, op)  # bitmap subtitles in MKV used to fail MP4 conversions
             self.assertIn("-sn", j, op)
             self.assertLess(j.index("-i"), j.index("-map"), op)
         fake = os.path.join(self.dir, "my ffmpeg 7")
@@ -847,7 +847,8 @@ class QueueTests(Base):
 
     def test_cancel_running_conversion(self):
         # A long "conversion" is killed, its temp file dropped, the queue cleared and a notification sent
-        tmp = self.write_job(["/bin/sh", "-c", 'echo partial > "$1"; exec sleep 30', "sh", self.p(".mt-test.out")], count="2")
+        # (the child's command line names the temp file, like a real conversion: that's how cancel recognises it)
+        tmp = self.write_job(["/bin/sh", "-c", 'echo partial > "$1"; exec tail -f "$1"', "sh", self.p(".mt-test.out")], count="2")
         self.write_job(["/bin/sh", "-c", "exit 0"], idx="2", count="2")
         w = subprocess.Popen(["./worker.sh"], cwd=SRC, env=base_env())
         lock = os.path.join(CACHE, "worker.lock")
@@ -878,14 +879,13 @@ class QueueTests(Base):
         self.assertEqual(notifications(), ["Converted fake ü.mov → out.mov"])
 
     def test_copy_install_command(self):
-        e = base_env(mt_op="copy", mt_files="[]")
-        old = subprocess.run(["pbpaste"], capture_output=True).stdout
-        try:
-            out = subprocess.run(["./action.sh", "brew install ffmpeg"], cwd=SRC, env=e, capture_output=True, text=True).stdout
-            self.assertIn("Copied", out)
-            self.assertEqual(subprocess.run(["pbpaste"], capture_output=True, text=True).stdout, "brew install ffmpeg")
-        finally:
-            subprocess.run(["pbcopy"], input=old)
+        # a file stands in for the clipboard: the tests never touch the real one
+        clip = os.path.join(self.dir, "clipboard.txt")
+        e = base_env(mt_op="copy", mt_files="[]", MT_TEST_CLIPBOARD_FILE=clip)
+        out = subprocess.run(["./action.sh", "brew install ffmpeg"], cwd=SRC, env=e, capture_output=True, text=True).stdout
+        self.assertIn("Copied", out)
+        with open(clip) as f:
+            self.assertEqual(f.read(), "brew install ffmpeg")
 
     def test_cancel_and_stale_lock(self):
         e = base_env()
@@ -1020,6 +1020,252 @@ class FFmpegTests(Base):
         self.run_op("scale:240")
         s, _ = self.streams(self.p("test ü 'src'.mp4"))
         self.assertEqual((s["video"]["width"], s["video"]["height"]), (426, 240))
+
+
+# ---------------------------------------------------------------- regressions from the independent audit
+
+class AuditImageTests(Base):
+    def test_rotate_keeps_16_bit_and_greyscale(self):
+        # re-rendered images were always drawn into an 8-bit RGB bitmap
+        deep = make(self.p("deep.png"), "public.png", 120, 80, depth16=True, p3=True)
+        self.assertEqual(probe(deep)["depth"], 16)
+        act("rotate:90", [deep])
+        info = probe(self.p("deep-edited.png"))
+        self.assertEqual((info["width"], info["height"], info["depth"], info["profile"]), (80, 120, 16, "Display P3"))
+        grey = make(self.p("grey.jpg"), "public.jpeg", 120, 80, gray=True)
+        act("flip:h", [grey])
+        self.assertEqual(probe(self.p("grey-edited.jpg"))["model"], "Gray")
+        # a huge 16-bit image falls back to 8 bits rather than doubling the memory
+        big = make(self.p("big16.png"), "public.png", 100, 100, depth16=True)
+        act("rotate:90", [big], MT_TEST_MAX_PIXELS=30000)  # decodes (≤ 15000 px at 16 bits), draws in 8 bits
+        self.assertEqual(probe(self.p("big16-edited.png"))["depth"], 8)
+
+    def test_remove_background_keeps_colour_space_and_depth(self):
+        # the cut-out was always written as 8-bit sRGB, clipping Display P3 colours from iPhone photos
+        src = make(self.p("p3.png"), "public.png", 600, 400, subject=True, p3=True, depth16=True)
+        act("removebg", [src])
+        info = probe(self.p("p3-edited.png"), [(5, 5), (300, 200)])
+        self.assertEqual((info["profile"], info["depth"]), ("Display P3", 16))
+        self.assertEqual(info["colors"][0][3], 0)
+        self.assertTrue(red(info["colors"][1]), info["colors"])
+        # greyscale sources still work (written as RGB with alpha)
+        grey = make(self.p("g.jpg"), "public.jpeg", 600, 400, subject=True, gray=True)
+        self.assertIn("transparent PNG", act("removebg", [grey]))
+
+    def test_multi_page_tiff(self):
+        # extra pages were dropped silently
+        tif = make(self.p("scan.tiff"), "public.tiff", 100, 60, frames=3)
+        self.assertEqual(probe(tif)["count"], 3)
+        act("rotate:90", [tif])
+        info = probe(self.p("scan-edited.tiff"))
+        self.assertEqual((info["count"], info["width"], info["height"]), (3, 60, 100))
+        act("strip:all", [tif])
+        self.assertEqual(probe(self.p("scan-edited-2.tiff"))["count"], 3)
+        self.assertIn("first page only", act("convert:png", [tif]))
+
+
+    def test_big_batches_run_in_chunks(self):
+        # JXA never freed CoreGraphics images: 200 photos grew to 17 GB. Now each file's objects are released,
+        # and big batches run in child processes of CHUNK files each
+        files = [make(self.p(f"c{i}.png"), "public.png", 40, 20) for i in range(7)] + [self.p("missing.png")]
+        msg = act("rotate:90", files, MT_TEST_CHUNK=3, mt_reveal=1)
+        self.assertEqual(msg, "Rotated 7 files · Failed: missing.png: file not found")
+        self.assertEqual(len([f for f in self.listdir() if "-edited" in f]), 7)
+        with open(os.path.join(CACHE, "reveal.txt")) as f:
+            self.assertEqual(len(f.read().split("\n")), 7)
+        self.assertEqual(notifications(), [])  # fewer than 10 files: no early notice
+
+
+class AuditQueueTests(QueueTests):
+    def test_videotoolbox_args(self):
+        mov = self.p("v.mov")
+        open(mov, "w").close()
+        env = dict(MT_TEST_FFMPEG="/opt/fake/ffmpeg", MT_TEST_ARCH="arm64")
+        _, jobs = self.job("mp4", [mov], **env)
+        j = jobs[0]
+        self.assertEqual(j[j.index("-allow_sw") + 1], "1")  # no hardware encoder → software, not a failure
+        self.assertEqual(j[j.index("-pix_fmt") + 1], "yuv420p")
+        # an Intel ffmpeg on Apple Silicon has no -q:v for VideoToolbox: it must get a bitrate
+        _, jobs = self.job("mp4", [mov], MT_TEST_FFMPEG_ARCHS="x86_64", **env)
+        self.assertNotIn("-q:v", jobs[0])
+        self.assertIn("-b:v", jobs[0])
+        _, jobs = self.job("mp4", [mov], MT_TEST_FFMPEG_ARCHS="x86_64,arm64", **env)
+        self.assertIn("-q:v", jobs[0])
+        # HEVC keeps 10-bit sources in 10 bits (format negotiation) instead of forcing 8-bit yuv420p
+        _, jobs = self.job("hevc", [mov], **env)
+        j = jobs[0]
+        self.assertNotIn("-pix_fmt", j)
+        self.assertIn("format=yuv420p|p010le", j[j.index("-vf") + 1])
+        # WebM: 8-bit 4:2:0 for browsers, stereo because libopus rejects 5.1(side)
+        _, jobs = self.job("webm", [mov], **env)
+        j = jobs[0]
+        self.assertEqual((j[j.index("-pix_fmt") + 1], j[j.index("-ac") + 1]), ("yuv420p", "2"))
+
+    def test_ffmpeg_architecture_from_the_binary(self):
+        mov = self.p("v.mov")
+        open(mov, "w").close()
+        intel = os.path.join(self.dir, "ffmpeg-intel")
+        with open(intel, "wb") as f:
+            f.write(bytes.fromhex("cffaedfe07000001") + b"\0" * 64)  # thin x86_64 Mach-O header
+        arm = os.path.join(self.dir, "ffmpeg-arm")
+        with open(arm, "wb") as f:
+            f.write(bytes.fromhex("cafebabe00000002" + "01000007" + "00" * 16 + "0100000c" + "00" * 16))  # universal
+        for path, expect in ((intel, "-b:v"), (arm, "-q:v")):
+            os.chmod(path, 0o755)
+            _, jobs = self.job("mp4", [mov], ffmpeg_path=path, MT_TEST_ARCH="arm64")
+            self.assertIn(expect, jobs[0], path)
+
+    def test_gif_uses_two_passes(self):
+        mov = self.p("v.mov")
+        open(mov, "w").close()
+        _, jobs = self.job("gif", [mov], MT_TEST_FFMPEG="/opt/fake/ffmpeg")
+        j = jobs[0]
+        tmp, cmd = j[6], j[10:]
+        k = cmd.index("::then::")
+        first, second = cmd[:k], cmd[k + 1:]
+        palette = first[-1]
+        self.assertEqual(palette, "file:" + tmp + "-aux-palette.png")
+        self.assertIn("palettegen", first[first.index("-vf") + 1])
+        self.assertNotIn("-progress", first)
+        self.assertEqual(second[0], "/opt/fake/ffmpeg")
+        self.assertIn(palette, second)
+        self.assertIn("paletteuse", second[second.index("-filter_complex") + 1])
+        self.assertEqual(second[-1], "file:" + tmp)
+
+    def test_unknown_operations_are_refused(self):
+        mov = self.p("v.mov")
+        open(mov, "w").close()
+        for op in ("compress:99", "compress:28;x", "scale:abc", "bogus"):
+            msg, jobs = self.job(op, [mov], MT_TEST_FFMPEG="/f/ffmpeg")
+            self.assertEqual((msg, jobs), (f"Unknown operation: {op}", []))
+
+    def run_worker(self, **env):
+        return subprocess.run(["./worker.sh"], cwd=SRC, env=base_env(**env), timeout=60)
+
+    def test_worker_runs_every_command_of_a_job(self):
+        tmp = self.p(".mt-test.out")
+        order = os.path.join(self.dir, "order.txt")
+        self.write_job(["/bin/sh", "-c", 'echo one >> "$0"; echo p > "$1-aux-palette.png"', order, tmp, "::then::",
+                        "/bin/sh", "-c", 'echo two >> "$0"; test -e "$1-aux-palette.png" && echo gif > "$1"', order, tmp])
+        self.run_worker()
+        with open(order) as f:
+            self.assertEqual(f.read().split(), ["one", "two"])
+        self.assertTrue(os.path.exists(self.p("out.mov")))
+        self.assertFalse([f for f in os.listdir(self.d) if f.startswith(".mt-")])  # palette removed
+        # a failing first command stops the job
+        self.write_job(["/bin/sh", "-c", "echo 'Stream map '\\''0:a:0'\\'' matches no streams.' >&2; exit 1", "::then::",
+                        "/bin/sh", "-c", 'echo x > "$0"', tmp])
+        self.run_worker()
+        self.assertEqual(notifications()[-1], "Failed: fake ü.mov: no audio track")
+        self.assertFalse(os.path.exists(self.p("out-2.mov")))
+
+    def test_jobs_queued_after_a_cancel_still_run(self):
+        # regression: a job queued while a cancelled conversion was still stopping was deleted
+        tmp = self.p(".mt-test.out")
+        self.write_job(["/bin/sh", "-c", 'trap "" TERM; echo a > "$1"; sleep 2', "sh", tmp], batch="a")
+        w = subprocess.Popen(["./worker.sh"], cwd=SRC, env=base_env())
+        lock = os.path.join(CACHE, "worker.lock")
+        end = time.time() + 20
+        while not os.path.exists(os.path.join(lock, "child")) and time.time() < end:
+            time.sleep(0.05)
+        subprocess.run(["./worker.sh", "--cancel"], cwd=SRC, env=base_env(), capture_output=True)
+        self.write_job(["/bin/sh", "-c", 'echo b > "$0"', self.p(".mt-test.out")], batch="b")
+        self.assertEqual(w.wait(timeout=20), 0)
+        self.assertEqual(notifications(), ["Cancelled the conversions", "Converted fake ü.mov → out.mov"])
+        with open(self.p("out.mov")) as f:
+            self.assertEqual(f.read().strip(), "b")  # the cancelled one was never saved
+
+    def test_stopped_worker_stops_its_conversion(self):
+        tmp = self.write_job(["/bin/sh", "-c", 'echo partial > "$1"; exec tail -f "$1"', "sh", self.p(".mt-test.out")])
+        w = subprocess.Popen(["./worker.sh"], cwd=SRC, env=base_env())
+        lock = os.path.join(CACHE, "worker.lock")
+        end = time.time() + 20
+        while not os.path.exists(os.path.join(lock, "child")) and time.time() < end:
+            time.sleep(0.05)
+        with open(os.path.join(lock, "child")) as f:
+            child = int(f.read())
+        w.terminate()
+        w.wait(timeout=10)
+        time.sleep(0.3)
+        self.assertRaises(ProcessLookupError, os.kill, child, 0)
+        self.assertFalse(os.path.exists(tmp))
+        self.assertFalse(os.path.exists(lock))
+
+    def test_stale_lock_orphan_is_stopped(self):
+        # a worker killed hard leaves its conversion running and a partial hidden file next to the video
+        tmp = self.p(".mt-orphan.mp4")
+        with open(tmp, "w") as f:
+            f.write("partial")
+        orphan = subprocess.Popen(["/usr/bin/tail", "-f", tmp], stdout=subprocess.DEVNULL)
+        self.addCleanup(orphan.kill)
+        lock = os.path.join(CACHE, "worker.lock")
+        os.makedirs(lock)
+        for name, value in (("pid", "999999"), ("child", str(orphan.pid)), ("tmp", tmp)):
+            with open(os.path.join(lock, name), "w") as f:
+                f.write(value)
+        self.run_worker()
+        self.assertIsNotNone(orphan.wait(timeout=5))
+        self.assertFalse(os.path.exists(tmp))
+        self.assertFalse(os.path.exists(lock))
+        # a live process that isn't our conversion (reused pid) is left alone
+        other = subprocess.Popen(["/bin/sleep", "30"])
+        self.addCleanup(other.kill)
+        os.makedirs(lock)
+        for name, value in (("pid", "999999"), ("child", str(other.pid)), ("tmp", tmp)):
+            with open(os.path.join(lock, name), "w") as f:
+                f.write(value)
+        self.run_worker()
+        self.assertIsNone(other.poll())
+
+    def test_progress_of_a_long_conversion_is_fast(self):
+        # the status regex scanned the whole progress file again for every match: minutes for a long movie
+        lock = os.path.join(CACHE, "worker.lock")
+        os.makedirs(lock, exist_ok=True)
+        fake = subprocess.Popen(["/bin/bash", "-c", "exec -a worker.sh /bin/sleep 30"])
+        self.addCleanup(fake.wait)
+        self.addCleanup(fake.kill)
+        try:
+            with open(os.path.join(lock, "pid"), "w") as f:
+                f.write(str(fake.pid))
+            with open(os.path.join(lock, "state"), "w") as f:
+                f.write("7200\nlong.mov\nffmpeg\n")
+            with open(os.path.join(CACHE, "progress.txt"), "w") as f:
+                for i in range(40000):
+                    f.write(f"frame={i}\nfps=30\nout_time_us={i * 90000}\nout_time_ms={i * 90000}\nspeed=1x\nprogress=continue\n")
+            start = time.time()
+            data = sf("vid", "", [], MT_TEST_FFMPEG="none")
+            self.assertLess(time.time() - start, 3)
+            self.assertEqual(data["items"][0]["title"], "Converting long.mov · 50%")
+        finally:
+            shutil.rmtree(lock, ignore_errors=True)
+            os.remove(os.path.join(CACHE, "progress.txt"))
+
+
+class AuditMiscTests(Base):
+    def test_finder_selection_in_one_apple_event(self):
+        a, b = make(self.p("a b.jpg")), make(self.p("ü.png"), "public.png")
+        quote = lambda x: '"' + x.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        script = "return {" + ", ".join(f"POSIX file {quote(x)} as alias" for x in (a, b)) + "}"
+        e = base_env(MT_TEST_SELECTION_SCRIPT=script)
+        e.pop("MT_TEST_SELECTION", None)
+        out = subprocess.run(["osascript", "-l", "JavaScript", "./media.js", "img", ""], cwd=SRC, env=e, capture_output=True, text=True)
+        data = json.loads(out.stdout)
+        nfc = lambda x: unicodedata.normalize("NFC", x)  # file URLs come back decomposed; both open the same file
+        self.assertEqual([nfc(x) for x in json.loads(data["variables"]["mt_sel"])], [nfc(os.path.realpath(a)), nfc(os.path.realpath(b))])
+
+    def test_errors_log_is_trimmed(self):
+        log = os.path.join(CACHE, "errors.log")
+        with open(log, "w") as f:
+            f.write("x" * 1500000)
+        act("copy", [], MT_TEST_CLIPBOARD_FILE=os.path.join(self.dir, "clip"))
+        self.assertLessEqual(os.path.getsize(log), 200000)
+        os.remove(log)
+
+    def test_avconvert_scale_subtitle(self):
+        mov = self.p("clip.mov")
+        open(mov, "w").close()
+        it = items("vid", "480", [mov], MT_TEST_FFMPEG="none")
+        self.assertIn("Fits within 640x480", it[0]["subtitle"])
 
 
 # ---------------------------------------------------------------- packaging

@@ -32,6 +32,7 @@ function frame(w, h, o, i) {
     $.CGContextFillRect(ctx, $.CGRectMake(0, 0, w, h));
     $.CGContextSetRGBFillColor(ctx, 0.9, 0.2, 0.1, 1);
     $.CGContextFillEllipseInRect(ctx, $.CGRectMake(w / 3, h / 4, w / 3, h / 2));
+    if (o.two) $.CGContextFillEllipseInRect(ctx, $.CGRectMake(w / 20, h / 4, w / 6, h / 2)); // a second subject
   } else if (o.noise) {
     $.CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
     $.CGContextFillRect(ctx, $.CGRectMake(0, 0, w, h));

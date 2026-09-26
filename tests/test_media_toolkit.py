@@ -1048,6 +1048,11 @@ class AuditImageTests(Base):
         self.assertEqual((info["profile"], info["depth"]), ("Display P3", 16))
         self.assertEqual(info["colors"][0][3], 0)
         self.assertTrue(red(info["colors"][1]), info["colors"])
+        # every subject is kept, not only the first
+        two = make(self.p("two.png"), "public.png", 600, 400, subject=True, two=True)
+        act("removebg", [two])
+        info = probe(self.p("two-edited.png"), [(80, 200), (300, 200), (165, 200)])
+        self.assertEqual([c[3] for c in info["colors"]], [255, 255, 0])
         # greyscale sources still work (written as RGB with alpha)
         grey = make(self.p("g.jpg"), "public.jpeg", 600, 400, subject=True, gray=True)
         self.assertIn("transparent PNG", act("removebg", [grey]))
@@ -1177,7 +1182,11 @@ class AuditQueueTests(QueueTests):
 
     def test_stopped_worker_stops_its_conversion(self):
         tmp = self.write_job(["/bin/sh", "-c", 'echo partial > "$1"; exec tail -f "$1"', "sh", self.p(".mt-test.out")])
-        w = subprocess.Popen(["./worker.sh"], cwd=SRC, env=base_env())
+        # C locale, as under Alfred: ps escapes the ü of the folder name (regression: the child wasn't recognised)
+        e = base_env()
+        for k in ("LANG", "LC_ALL", "LC_CTYPE"):
+            e.pop(k, None)
+        w = subprocess.Popen(["./worker.sh"], cwd=SRC, env=e)
         lock = os.path.join(CACHE, "worker.lock")
         end = time.time() + 20
         while not os.path.exists(os.path.join(lock, "child")) and time.time() < end:

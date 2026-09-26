@@ -16,8 +16,10 @@ mkdir -p "$queue" "$batches"
 alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null; }
 # The pid in a stale lock (after a crash or restart) may since belong to another process
 is_worker() { alive "$1" && /bin/ps -p "$1" -o command= 2>/dev/null | grep -q 'worker\.sh'; }
-# A conversion is only killed if its command line still names our temp file (pids get reused)
-is_child() { alive "$1" && [ -n "$2" ] && /bin/ps -ww -p "$1" -o command= 2>/dev/null | grep -qF -- "$2"; }
+# A conversion is only killed if its command line still names our temp file (pids get reused). Only the
+# file name is compared: it is ASCII (.mt-<pid>-<ms>-<n>.ext), while ps escapes other characters of the
+# folder path when the locale isn't UTF-8, as under Alfred.
+is_child() { alive "$1" && [ -n "$2" ] && /bin/ps -ww -p "$1" -o command= 2>/dev/null | grep -qF -- "${2##*/}"; }
 
 notify() {
   if [ -n "$MT_TEST_NOTIFY_FILE" ]; then

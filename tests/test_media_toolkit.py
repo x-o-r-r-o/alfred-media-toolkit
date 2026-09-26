@@ -35,7 +35,7 @@ def base_env(**extra):
     e = dict(os.environ, MT_TEST="1", alfred_workflow_cache=CACHE, alfred_workflow_bundleid="io.github.x-o-r-r-o.media-toolkit",
              MT_TEST_NOTIFY_FILE=os.path.join(CACHE, "notify.txt"), MT_TEST_REVEAL_FILE=os.path.join(CACHE, "reveal.txt"))
     for k in ("output_suffix", "replace_originals", "image_quality", "mt_files", "mt_op", "mt_reveal", "mt_ua_files", "mt_sel",
-              "ffmpeg_path", "MT_TEST_SELECTION", "MT_TEST_SELECTION_SCRIPT", "MT_TEST_FALLBACK_DIR", "MT_TEST_CLIPBOARD_FILE"):
+              "ffmpeg_path", "keep_dates", "mt_copy", "MT_TEST_SELECTION", "MT_TEST_SELECTION_SCRIPT", "MT_TEST_FALLBACK_DIR", "MT_TEST_CLIPBOARD_FILE"):
         e.pop(k, None)
     e.update({k: str(v) for k, v in extra.items()})
     return e
@@ -1397,6 +1397,167 @@ class AuditMiscTests(Base):
         open(mov, "w").close()
         it = items("vid", "480", [mov], MT_TEST_FFMPEG="none")
         self.assertIn("Fits within 640x480", it[0]["subtitle"])
+
+
+# ---------------------------------------------------------------- round 4: Alfred's runtime, v1.1 features
+
+OLD = time.mktime((2019, 5, 6, 12, 0, 0, 0, 0, -1))
+
+
+def birthtime(path):
+    return os.stat(path).st_birthtime
+
+
+class Round4Tests(Base):
+    job = QueueTests.job
+
+    def fake_ffmpeg(self, body):
+        path = os.path.join(self.dir, "ffmpeg")
+        with open(path, "w") as f:
+            f.write("#!/bin/bash\n" + body + "\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def test_failure_reason_is_short_valid_utf8(self):
+        # Alfred runs scripts in the C locale, where cut counts bytes: a reason cut inside "ü" made osascript
+        # receive undefined, and no notification arrived. The source's folder path is dropped too.
+        d = os.path.join(self.d, "Ordner " + "ü" * 90)
+        os.makedirs(d)
+        wav = write_wav(os.path.join(d, "tön.wav"), seconds=0.2)
+        ff = self.fake_ffmpeg('for a in "$@"; do case "$a" in file:*.wav) s="${a#file:}";; esac; done\n'
+                              'echo "x${s}: Invalid data found when processing input" >&2; exit 1')
+        env = dict(PATH="/usr/bin:/bin:/usr/sbin:/sbin", LANG="", LC_ALL="", LC_CTYPE="")
+        act("mp3", [wav], MT_TEST_FFMPEG=ff, MT_TEST_FFMPEG_ENCODERS="libmp3lame", MT_TEST_WORKER_FOREGROUND=1, **env)
+        with open(os.path.join(CACHE, "notify.txt"), "rb") as f:
+            n = f.read().decode("utf-8").strip()  # raises when not valid UTF-8
+        self.assertEqual(n, "Failed: tön.wav: xtön.wav: Invalid data found when processing input")
+        for k in range(1, 4):  # every cut position inside a two-byte character
+            self.assertEqual(subprocess.run(["bash", "-c", 'printf "%s" "$1" | cut -c1-' + str(2 * k + 1) + ' | iconv -c -f UTF-8 -t UTF-8 2>/dev/null', "_", "ü" * 9],
+                                            capture_output=True, env={"PATH": "/usr/bin:/bin"}).stdout.decode().rstrip("\n"), "ü" * k)
+
+    def test_checkbox_values(self):
+        jpg = make(self.p("a.jpg"), w=100, h=80)
+        act("resize:pct:50", [jpg], replace_originals="true")
+        self.assertEqual(self.listdir(), ["a.jpg"])
+        self.assertEqual(sips(jpg)[:2], (50, 40))
+        act("resize:pct:50", [jpg], replace_originals="0")
+        self.assertEqual(self.listdir(), ["a-edited.jpg", "a.jpg"])
+
+    def test_fallback_subtitle_has_no_leading_separator(self):
+        wav = write_wav(self.p("t.wav"), seconds=0.2)
+        subs = [i["subtitle"] for i in items("vid", "m4a", [wav], MT_TEST_FFMPEG="none")]
+        self.assertEqual(subs[0], "via afconvert · t.wav")
+
+    def test_keep_dates_images(self):
+        jpg = make(self.p("a.jpg"), w=100, h=80)
+        os.utime(jpg, (OLD, OLD))
+        act("resize:pct:50", [jpg])
+        self.assertGreater(os.path.getmtime(self.p("a-edited.jpg")), OLD + 86400)  # off by default
+        act("convert:png", [jpg], keep_dates="1")
+        self.assertEqual(os.path.getmtime(self.p("a.png")), OLD)
+        self.assertEqual(birthtime(self.p("a.png")), birthtime(jpg))
+        act("rotate:90", [jpg], keep_dates="1", replace_originals="1")
+        self.assertEqual(os.path.getmtime(jpg), OLD)
+        self.assertEqual(sips(jpg)[:2], (80, 100))
+
+    def test_copy_results_images(self):
+        jpg = make(self.p("a b.jpg"), w=100, h=80)
+        clip = os.path.join(self.dir, "clip.txt")
+        it = items("img", "50%", [jpg])[0]
+        self.assertEqual(it["mods"]["alt"]["variables"]["mt_copy"], "1")
+        self.assertEqual(it["mods"]["alt"]["arg"], it["arg"])
+        self.assertEqual(it["variables"]["mt_copy"], "0")
+        msg = act("resize:pct:50", [jpg], mt_copy="1", MT_TEST_CLIPBOARD_FILE=clip)
+        self.assertTrue(msg.endswith(" · copied to the clipboard"), msg)
+        with open(clip) as f:
+            self.assertEqual(f.read(), self.p("a b-edited.jpg"))
+        os.remove(clip)
+        act("resize:pct:50", [jpg], MT_TEST_CLIPBOARD_FILE=clip)
+        self.assertFalse(os.path.exists(clip))  # only with ⌥↩
+
+    def test_worker_copy_and_dates(self):
+        wavs = [write_wav(self.p(f"t{i}.wav"), seconds=0.3) for i in range(2)]
+        for w in wavs:
+            os.utime(w, (OLD, OLD))
+        clip = os.path.join(self.dir, "clip.txt")
+        _, jobs = self.job("flac", wavs, MT_TEST_FFMPEG="none", mt_copy="1")
+        self.assertEqual([j[8] for j in jobs], ["2", "2"])
+        act("flac", wavs, MT_TEST_FFMPEG="none", MT_TEST_WORKER_FOREGROUND=1, mt_copy="1", keep_dates="1", MT_TEST_CLIPBOARD_FILE=clip)
+        self.assertEqual(notifications()[-1], "Converted 2 files · copied to the clipboard")
+        with open(clip) as f:
+            self.assertEqual(f.read().split("\n")[:2], [self.p("t0.flac"), self.p("t1.flac")])
+        self.assertEqual(os.path.getmtime(self.p("t0.flac")), OLD)
+        # a v1.0.0 job (reveal field 0/1) still runs
+        act("aiff", wavs[:1], MT_TEST_FFMPEG="none", MT_TEST_WORKER_FOREGROUND=1, mt_reveal="1")
+        with open(os.path.join(CACHE, "reveal.txt")) as f:
+            self.assertEqual(f.read().strip(), self.p("t0.aiff"))
+        self.assertGreater(os.path.getmtime(self.p("t0.aiff")), OLD + 86400)
+
+    def test_gif_of_a_range(self):
+        mov = self.p("v ü.mov")
+        open(mov, "w").close()
+        ff = dict(MT_TEST_FFMPEG="/opt/fake/ffmpeg")
+        it = items("vid", "gif 0:10-0:15", [mov], **ff)
+        self.assertEqual([i["arg"] for i in it], ["gif:0_10-0_15"])
+        self.assertIn("from 0:10 to 0:15", it[0]["title"])
+        self.assertEqual(items("vid", "gif 1:00-", [mov], **ff)[0]["arg"], "gif:1_00-")
+        self.assertEqual(items("vid", "gif 5-2", [mov], **ff)[0]["title"], "Invalid range")
+        self.assertEqual(items("vid", "gif 0:10-0:15", [mov], MT_TEST_FFMPEG="none")[0]["title"], "Install ffmpeg with Homebrew")
+        self.assertIn("gif", [i["arg"] for i in items("vid", "gif", [mov], **ff)])
+        _, jobs = self.job("gif:0_10-0_15", [mov], **ff)
+        cmd = jobs[0][10:]
+        k = cmd.index("::then::")
+        for part in (cmd[:k], cmd[k + 1:]):
+            self.assertEqual(part[part.index("-ss") + 1], "10")
+            self.assertEqual(part[part.index("-t") + 1], "5")
+            self.assertLess(part.index("-ss"), part.index("-i"))
+        self.assertTrue(jobs[0][5].endswith("v ü.gif"))
+        msg, jobs = self.job("gif:0_20-0_10", [mov], **ff)
+        self.assertEqual((msg, jobs), ("Invalid gif range", []))
+
+    def test_action_output_is_never_blank(self):
+        # The action feeds a Notification set to "only show if populated": it prints either nothing at all or a
+        # real message (each operation's result is the notification), never a bare newline
+        def raw(op, files, **env):
+            e = base_env(mt_op=op, mt_files=json.dumps(files), **env)
+            return subprocess.run(["./action.sh", op], cwd=SRC, env=e, capture_output=True, text=True, timeout=120).stdout
+        log = os.path.join(CACHE, "conversions.log")
+        open(log, "a").close()
+        self.assertEqual(raw("log", []), "")
+        jpg = make(self.p("a.jpg"), w=60, h=40)
+        wav = write_wav(self.p("t.wav"), seconds=0.2)
+        for op, files, env in (("resize:pct:50", [jpg], {}), ("flac", [wav], dict(MT_TEST_FFMPEG="none", MT_TEST_WORKER_FOREGROUND="1")),
+                               ("cancel", [], {}), ("copy", [], dict(MT_TEST_CLIPBOARD_FILE=os.path.join(self.dir, "c.txt"))),
+                               ("resize:pct:50", [], {}), ("bogus", [], {})):
+            out = raw(op, files, **env)
+            self.assertTrue(out.strip(), (op, out))
+
+    def test_minimal_alfred_environment(self):
+        # Alfred's PATH has no Homebrew; ffmpeg is still found in a Homebrew-style folder (symlink into a Cellar)
+        # through ffmpeg_path, and the Script Filter output is the same without LANG/LC_*
+        cellar = os.path.join(self.dir, "brew", "Cellar", "ffmpeg", "7.1", "bin")
+        os.makedirs(cellar)
+        real = os.path.join(cellar, "ffmpeg")
+        with open(real, "w") as f:
+            f.write("#!/bin/bash\nprintf ' A....D libmp3lame x\\n'\n")
+        os.chmod(real, 0o755)
+        os.makedirs(os.path.join(self.dir, "brew", "bin"))
+        link = os.path.join(self.dir, "brew", "bin", "ffmpeg")
+        os.symlink("../Cellar/ffmpeg/7.1/bin/ffmpeg", link)
+        wav = write_wav(self.p("tön.wav"), seconds=0.2)
+        e = {"HOME": os.environ["HOME"], "USER": os.environ.get("USER", ""), "TMPDIR": os.environ.get("TMPDIR", "/tmp"),
+             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "MT_TEST": "1", "alfred_workflow_cache": os.path.join(self.dir, "fresh cache", "x"),
+             "alfred_workflow_data": os.path.join(self.dir, "fresh data"), "alfred_version": "5.6", "alfred_debug": "1",
+             "MT_TEST_SELECTION": json.dumps([wav])}
+        for d in (os.path.dirname(link), cellar):
+            out = subprocess.run(["osascript", "-l", "JavaScript", "./media.js", "vid", "mp3"], cwd=SRC, env=dict(e, ffmpeg_path=" " + d + " "),
+                                 capture_output=True, text=True)
+            it = json.loads(out.stdout)["items"]
+            self.assertEqual([i["arg"] for i in it], ["mp3"], it)
+        out = subprocess.run(["osascript", "-l", "JavaScript", "./media.js", "vid", "mp3"], cwd=SRC, env=dict(e, ffmpeg_path=link),
+                             capture_output=True, text=True)
+        self.assertEqual(json.loads(out.stdout)["items"][0]["arg"], "mp3")
+        self.assertTrue(os.path.exists(os.path.join(e["alfred_workflow_cache"], "ffmpeg-encoders.txt")))  # fresh cache folder made
 
 
 # ---------------------------------------------------------------- packaging

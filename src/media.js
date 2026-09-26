@@ -78,8 +78,16 @@ function suffix() {
   // (sliced by code point, so an emoji is never cut in half)
   return Array.from(env("output_suffix", "-edited").replace(/[\/:\0\n\r\t]/g, "")).slice(0, 60).join("");
 }
+// Workflow Configuration checkboxes arrive as "1"/"0"; accept "true"/"yes" too (set by hand or by an older Alfred)
+function checked(name) {
+  return /^(1|true|yes)$/i.test(env(name, "0").trim());
+}
+// "Keep the original dates": results get the source's modification and creation dates
+function keepDates() {
+  return checked("keep_dates");
+}
 function replaceOriginals() {
-  return env("replace_originals", "0") === "1";
+  return checked("replace_originals");
 }
 function quality() {
   const q = parseInt(env("image_quality", "85"), 10);
@@ -137,8 +145,27 @@ function tempPathFor(finalPath) {
   const pid = $.NSProcessInfo.processInfo.processIdentifier;
   return `${dir}/.mt-${pid}-${Date.now()}-${tmpSeq++}${ext ? "." + ext : ""}`;
 }
+// The dates to give a result of `src` (null unless "Keep the original dates" is on). Read before the
+// original may be replaced.
+function sourceDates(src) {
+  if (!src || !keepDates()) return null;
+  const a = FM.attributesOfItemAtPathError(src, $());
+  if (a.isNil()) return null;
+  const d = $.NSMutableDictionary.dictionary;
+  if (!a.fileModificationDate.isNil()) d.setObjectForKey(a.fileModificationDate, $.NSFileModificationDate);
+  const c = a.objectForKey($.NSFileCreationDate);
+  if (!c.isNil()) d.setObjectForKey(c, $.NSFileCreationDate);
+  return d;
+}
+// Best effort: a volume that can't store the date (some network shares) keeps the conversion anyway
+function applyDates(path, dates) {
+  if (dates) FM.setAttributesOfItemAtPathError(dates, path, $());
+}
+
 // Move a finished temp file into place, never clobbering anything except an intentionally replaced original.
-function commit(tmp, plan) {
+// `src` is the original, for "Keep the original dates".
+function commit(tmp, plan, src) {
+  const dates = sourceDates(src);
   if (plan.replace) {
     const err = Ref();
     const ok = FM.replaceItemAtURLWithItemAtURLBackupItemNameOptionsResultingItemURLError(
@@ -147,12 +174,16 @@ function commit(tmp, plan) {
       FM.removeItemAtPathError(tmp, $());
       throw new Error("could not replace the original");
     }
+    applyDates(plan.path, dates);
     return plan.path;
   }
   let target = plan.path;
   const stem = stemOf(plan.path), ext = baseName(plan.path).includes(".") ? baseName(plan.path).split(".").pop() : "";
   for (let i = 0; i < 100; i++) {
-    if (FM.moveItemAtPathToPathError(tmp, target, $())) return target;
+    if (FM.moveItemAtPathToPathError(tmp, target, $())) {
+      applyDates(target, dates);
+      return target;
+    }
     if (!exists(target)) break; // failed for another reason (permissions, disk full)
     target = uniquePath(dirOf(plan.path), stem, ext);
   }
@@ -557,7 +588,7 @@ function processImage(path, op) {
     FM.removeItemAtPathError(tmp, $());
     throw e;
   }
-  const out = commit(tmp, plan);
+  const out = commit(tmp, plan, path);
   return { out, detail: detail || sizeText(fileSize(out)), note: notes.join(", ") };
 }
 
@@ -617,7 +648,7 @@ function stripMetadata(info, srcFmt, gpsOnly) {
     FM.removeItemAtPathError(tmp, $());
     throw e;
   }
-  const out = commit(tmp, plan);
+  const out = commit(tmp, plan, info.path);
   return { out, detail: gpsOnly ? "location removed" : "metadata removed", note: notes.filter(Boolean).join(", ") };
 }
 
@@ -666,7 +697,7 @@ function removeBackground(info, crop) {
     FM.removeItemAtPathError(tmp, $());
     throw new Error("could not write the PNG");
   }
-  const out = commit(tmp, plan);
+  const out = commit(tmp, plan, info.path);
   const ext = ci.extent;
   const note = [plan.note, info.count > 1 ? (info.animated ? "first frame only" : "first page only") : ""].filter(Boolean).join(", ");
   return { out, detail: `${Math.round(ext.size.width)}×${Math.round(ext.size.height)}, transparent PNG`, note };
@@ -746,7 +777,12 @@ function applyImages(op) {
   appendLog(`${new Date().toISOString()} ${op}: ${done.length} ok, ${skipped.length} skipped, ${failed.length} failed` +
     failed.map(([f, m]) => `\n  ${f}: ${m}`).join(""));
   if (env("mt_reveal", "0") === "1" && done.length) reveal(done.map(([, r]) => r.out));
-  return summary(verb, done, failed, skipped, new Set(res.notes));
+  let copied = "";
+  if (env("mt_copy", "0") === "1" && done.length) {
+    copyFiles(done.map(([, r]) => r.out));
+    copied = ` · ${done.length === 1 ? "copied" : `${done.length} files copied`} to the clipboard`;
+  }
+  return summary(verb, done, failed, skipped, new Set(res.notes)) + copied;
 }
 
 function processFiles(files, op) {
@@ -847,6 +883,19 @@ function notifyAlfred(msg) {
   } catch (e) {
     // Alfred not reachable: the final notification still arrives
   }
+}
+
+// Put the files on the clipboard, ready to paste into Finder, Mail or a chat
+function copyFiles(paths) {
+  const t = env("MT_TEST_CLIPBOARD_FILE", "");
+  if (t) {
+    $(paths.join("\n")).writeToFileAtomicallyEncodingError(t, true, $.NSUTF8StringEncoding, $());
+    return;
+  }
+  if (TEST) return;
+  const pb = $.NSPasteboard.generalPasteboard;
+  pb.clearContents;
+  pb.writeObjects($(paths.map((p) => $.NSURL.fileURLWithPath(p))));
 }
 
 function reveal(paths) {
@@ -1180,13 +1229,17 @@ function enqueue(opId) {
   const dir = `${cacheDir()}/queue`;
   FM.createDirectoryAtPathWithIntermediateDirectoriesAttributesError(dir, true, $(), $());
   // Only operations the Script Filters offer: the id ends up in ffmpeg arguments
-  if (!/^(?:mp4|hevc|webm|mov|gif|mute|mp3|m4a|wav|flac|aiff|compress:(?:[1-4]\d|5[01])|scale:[1-9]\d{1,3}|trim:.*)$/.test(opId)) {
+  if (!/^(?:mp4|hevc|webm|mov|gif|gif:.+|mute|mp3|m4a|wav|flac|aiff|compress:(?:[1-4]\d|5[01])|scale:[1-9]\d{1,3}|trim:.*)$/.test(opId)) {
     return { queued: 0, message: `Unknown operation: ${opId}` };
   }
   const base = opId.split(":")[0];
-  const trim = base === "trim" ? parseTrim(opId.slice(5).replace(/_/g, ":")) : null;
-  if (base === "trim" && !trim) return { queued: 0, message: "Invalid trim range" };
+  // trim:<range>, and gif:<range> for a GIF of part of the video (":" is written "_" in the id)
+  const ranged = base === "trim" || (base === "gif" && opId.includes(":"));
+  const trim = ranged ? parseTrim(opId.slice(base.length + 1).replace(/_/g, ":")) : null;
+  if (ranged && !trim) return { queued: 0, message: `Invalid ${base} range` };
   const batch = `${Date.now()}-${$.NSProcessInfo.processInfo.processIdentifier}`;
+  // What to do with the results: 1 reveal in Finder, 2 copy to the clipboard, 0 nothing (v1.0.0 wrote only 0/1)
+  const after = env("mt_reveal", "0") === "1" ? "1" : env("mt_copy", "0") === "1" ? "2" : "0";
   const jobs = [], failed = [], taken = [], notes = new Set();
   for (const f of files) {
     const kind = kindOf(f);
@@ -1212,7 +1265,7 @@ function enqueue(opId) {
       continue;
     }
     if (plan.note) notes.add(plan.note);
-    jobs.push([baseName(f), f, plan.path, tmp, plan.replace ? "1" : "0", env("mt_reveal", "0") === "1" ? "1" : "0", tool, ...cmd]);
+    jobs.push([baseName(f), f, plan.path, tmp, plan.replace ? "1" : "0", after, tool, ...cmd]);
   }
   jobs.forEach((j, i) => {
     const fields = [batch, String(i + 1), String(jobs.length), ...j];
@@ -1373,9 +1426,10 @@ function opItem(title, subtitle, op, files, icon, extra = {}) {
     valid: true,
     icon: { path: `icons/${icon}.png` },
     quicklookurl: files[0],
-    variables: Object.assign({ mt_reveal: "0" }, vars),
+    variables: Object.assign({ mt_reveal: "0", mt_copy: "0" }, vars),
     mods: {
-      cmd: { arg: op, valid: true, subtitle: "Run, then reveal the result in Finder", variables: Object.assign({ mt_reveal: "1" }, vars) },
+      cmd: { arg: op, valid: true, subtitle: "Run, then reveal the result in Finder", variables: Object.assign({ mt_reveal: "1", mt_copy: "0" }, vars) },
+      alt: { arg: op, valid: true, subtitle: "Run, then copy the result to the clipboard", variables: Object.assign({ mt_reveal: "0", mt_copy: "1" }, vars) },
     },
     text: files.length <= 200 ? { copy: files.join("\n"), largetype: files.map(baseName).join("\n") } : { largetype: `${files.length} files` },
   }, extra);
@@ -1483,7 +1537,10 @@ function avItems(files, query) {
       valid: true,
       icon: { path: "icons/progress.png" },
       variables: { mt_files: "[]", mt_op: "cancel" },
-      mods: { cmd: { arg: "log", valid: true, subtitle: "Reveal the conversion log in Finder", variables: { mt_files: "[]", mt_op: "log" } } },
+      mods: {
+        cmd: { arg: "log", valid: true, subtitle: "Reveal the conversion log in Finder", variables: { mt_files: "[]", mt_op: "log" } },
+        alt: { arg: "cancel", valid: true, subtitle: "Cancel all", variables: { mt_files: "[]", mt_op: "cancel" } },
+      },
     });
   }
 
@@ -1504,6 +1561,19 @@ function avItems(files, query) {
     const id = `trim:${fmtTime(r.start).replace(/:/g, "_")}-${r.end === null ? "" : fmtTime(r.end).replace(/:/g, "_")}`;
     return items.concat([opItem(`Trim ${usable.length === 1 ? clean(baseName(usable[0])) : plural(usable.length, "file")} from ${fmtTime(r.start)} to ${r.end === null ? "the end" : fmtTime(r.end)}`,
       "Frame-accurate, re-encoded", id, usable, "trim")]);
+  }
+
+  // A GIF of part of the video: gif 0:10-0:15
+  if ((m = q.match(/^gif\s+(\S.*)$/))) {
+    if (!byKind.video.length) return items.concat([info("Select a video to make a GIF", "", "info")]);
+    const r = parseTrim(m[1]);
+    if (!r) return items.concat([info("Invalid range", "Use start-end with seconds or [h:]mm:ss, e.g. gif 0:10-0:15", "error", { autocomplete: "gif " })]);
+    if (!ffmpeg) return items.concat([installItem("Making a GIF needs ffmpeg")]);
+    const id = `gif:${fmtTime(r.start).replace(/:/g, "_")}-${r.end === null ? "" : fmtTime(r.end).replace(/:/g, "_")}`;
+    const w = parseInt(env("gif_width", "480"), 10);
+    const vids = byKind.video;
+    return items.concat([opItem(`GIF of ${vids.length === 1 ? clean(baseName(vids[0])) : plural(vids.length, "video")} from ${fmtTime(r.start)} to ${r.end === null ? "the end" : fmtTime(r.end)}`,
+      `${w > 0 ? `Up to ${w} px wide` : "Original size"}, ${parseInt(env("gif_fps", "15"), 10) || 15} fps`, id, vids, "gif")]);
   }
 
   const missing = [];
@@ -1534,10 +1604,10 @@ function avItems(files, query) {
     }
     const count = usable.length === 1 ? "" : ` (${usable.length} files)`;
     const tool = toolFor(op.id, kindOf(usable[0]), extOf(usable[0]), ffmpeg);
-    const via = tool === "ffmpeg" ? "" : ` · via ${tool}`;
+    const via = tool === "ffmpeg" ? "" : `via ${tool}`;
     // avconvert's size presets fit the video in a box rather than capping the short side
     if (tool === "avconvert" && op.id.startsWith("scale:")) sub = `Fits within ${AVCONVERT_SCALE[op.id.slice(6)].slice(6)}`;
-    items.push(opItem(`${title}${count}`, `${sub}${via}`, op.id, usable, isAudioOp ? "audio" : op.id.split(":")[0]));
+    items.push(opItem(`${title}${count}`, [sub, via].filter(Boolean).join(" · "), op.id, usable, isAudioOp ? "audio" : op.id.split(":")[0]));
   }
   if (!q || "trim".startsWith(q.split(/\s+/)[0])) {
     const targets = [...byKind.video, ...byKind.audio];
@@ -1556,7 +1626,10 @@ function installItem(sub) {
     valid: true,
     icon: { path: "icons/download.png" },
     variables: { mt_op: "copy", mt_files: "[]" },
-    mods: { cmd: { arg: "brew install ffmpeg", valid: true, subtitle: "Copy “brew install ffmpeg”", variables: { mt_op: "copy", mt_files: "[]" } } },
+    mods: {
+      cmd: { arg: "brew install ffmpeg", valid: true, subtitle: "Copy “brew install ffmpeg”", variables: { mt_op: "copy", mt_files: "[]" } },
+      alt: { arg: "brew install ffmpeg", valid: true, subtitle: "Copy “brew install ffmpeg”", variables: { mt_op: "copy", mt_files: "[]" } },
+    },
     text: { copy: "brew install ffmpeg" },
   };
 }

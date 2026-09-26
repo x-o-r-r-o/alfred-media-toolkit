@@ -23,6 +23,11 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 - [x] Batch on multiple selected files; output next to source with suffix or replace originals; never clobber; read-only folders fall back to Downloads
 - [ ] Optional TinyPNG compress when API key set (deferred: v1 stays offline)
 
+## Added in v1.1 (round 4)
+- [x] <kbd>⌥</kbd><kbd>↩</kbd> copies the results to the clipboard as files (images at once, video/audio when the batch finishes)
+- [x] “Keep the original dates” checkbox: results get the source's modification (and creation) date (raycast/extensions#30005)
+- [x] `gif 0:10-0:15`: a GIF of part of a video (both ffmpeg passes seek and cut)
+
 ## Known limitations
 - The HDR gain map of iPhone photos is dropped: edited photos are standard dynamic range. HDR video keeps 10 bits only with HEVC; other formats are 8-bit without tone mapping.
 - Background removal needs macOS 14 (Vision's foreground instance mask); it is hidden on macOS 13.
@@ -42,6 +47,8 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 - [ ] The "finished" notification arrives through the External Trigger.
 - [ ] ffmpeg from Homebrew is found although Alfred's PATH lacks /opt/homebrew/bin.
 - [ ] 10+ images show the early "Processing…" notification.
+- [ ] <kbd>⌥</kbd><kbd>↩</kbd> on an image operation and on a video conversion: the results can be pasted in Finder and Mail.
+- [ ] Background removal on an Intel Mac with macOS 14+ (Vision may refuse without a Neural Engine: the error item must say so clearly).
 
 ## Tech
 - **Stack:** bash + JXA using the ObjC bridge to ImageIO, CoreGraphics, CoreImage and Vision (no compiled binary to sign and notarise).
@@ -73,3 +80,23 @@ Sources: alfred.app/submit, alfred.app/submit/styleguide, alfred.app/submit/scre
 - [ ] Sync `tools/build.py` from alfred-devtoolbox (it lacks the audited fixes, e.g. `argumenttreatemptyqueryasnil`), then rebuild
 - [ ] Version bumped in `workflow.json`; `python3 tools/build.py --package`; GitHub release with the `.alfredworkflow` attached
 - [ ] Forum post in "Share your Workflows" with a screenshot, keywords, and the GitHub link
+
+## Round 4 audit (post-release, Alfred's runtime)
+Checked under `env -i` with Alfred's PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), no LANG/LC_*, Alfred variables with spaces, fresh cache folders.
+- ffmpeg lookup doesn't depend on PATH: /opt/homebrew/bin, /usr/local/bin, MacPorts and Nix are searched explicitly, symlinks into a Cellar work, `ffmpeg_path` may be a file or folder (trimmed, `~/` expanded). The current Homebrew formula has every encoder used here (x264, libvpx, opus, lame, VideoToolbox); the slimmed builds of early 2026 are caught by the encoder check.
+- macOS 13: every API used exists on 13.0 except Vision's foreground instance mask (macOS 14, feature-detected and hidden). ImageIO WebP/AVIF encoding is detected at runtime. avconvert `--start/--duration/--progress`, afconvert FLAC and the JS features used (no ES2023+) are all on 13.
+- Fixed: a failure notification could vanish under the C locale (cut split a UTF-8 character; osascript then passes `undefined`); the reason now shows the file name instead of its whole folder path.
+- Fixed: " · via afconvert" subtitles started with a separator; checkboxes also accept "true"/"yes".
+
+## Ideas for v1.1
+Ranked by value/risk (from raycast/extensions issues for Image Modification, Media Converter and Remove Background, 2025-2026):
+1. Read the selection from Finder alternatives (Path Finder, ForkLift, QSpace) — requested repeatedly; the Universal Action already covers them.
+2. Rotate video losslessly (`-display_rotation` with `-c copy`, ffmpeg 6.1+), for sideways phone clips.
+3. Save a video frame as PNG/JPEG (`frame 0:05`), with AVAssetImageGenerator when ffmpeg is missing.
+4. Speed up / slow down video (`speed 2x`), and reverse for short clips.
+5. A target size for images (`< 500 KB`): search the JPEG/HEIC quality that fits.
+6. Per-format quality for optimize (PNG quantisation isn't possible with ImageIO alone; consider a lossy 8-bit palette via CoreGraphics).
+7. Custom ffmpeg presets in the Workflow's Configuration (raycast/extensions: "allow custom ffmpeg commands").
+8. Selective metadata keep (dates and camera, but not GPS) when converting.
+9. JPEG XL input is read by ImageIO on macOS 14+; output isn't possible yet.
+10. SVG/PDF input rasterised at a chosen size.

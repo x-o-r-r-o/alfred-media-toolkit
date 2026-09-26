@@ -43,6 +43,16 @@
 				<key>vitoclose</key>
 				<false/>
 			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+				<key>modifiers</key>
+				<integer>524288</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
 		</array>
 		<key>45253CC5-B3B4-54EC-958D-76A20BA62137</key>
 		<array>
@@ -79,6 +89,16 @@
 				<key>vitoclose</key>
 				<false/>
 			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+				<key>modifiers</key>
+				<integer>524288</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
 		</array>
 		<key>907248FA-AA45-5246-99D0-93DA151832DC</key>
 		<array>
@@ -110,6 +130,16 @@
 				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
 				<key>modifiers</key>
 				<integer>1048576</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>E6F8C765-B081-5366-8914-92FF0BC2E716</string>
+				<key>modifiers</key>
+				<integer>524288</integer>
 				<key>modifiersubtext</key>
 				<string></string>
 				<key>vitoclose</key>
@@ -408,17 +438,18 @@ Edit the images selected in Finder via the `img` keyword. Type what you want aft
 
 * &lt;kbd&gt;↩&lt;/kbd&gt; Run the operation.
 * &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Run the operation, then reveal the results in Finder.
+* &lt;kbd&gt;⌥&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Run the operation, then copy the results to the clipboard, ready to paste into a message or another folder.
 * &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;Y&lt;/kbd&gt; Quick Look the first selected file.
 * &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;C&lt;/kbd&gt; Copy the paths of the selected files.
 * &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;L&lt;/kbd&gt; Show the selected file names.
 
 A selected folder stands for the images, videos and audio files directly inside it.
 
-Results are saved next to the originals with the suffix from the Workflow’s Configuration (`-edited` by default), or replace the originals if you turn that on there. Existing files are never overwritten: a number is added instead. Photos are resized and converted the way they are displayed, so EXIF rotation is respected, animated GIFs keep their frames, and transparency becomes white only in formats without an alpha channel. Colour profiles (such as Display P3), 16-bit depth and the pages of multi-page TIFFs are kept; the HDR gain map of iPhone photos is not, so edited photos are standard dynamic range. When a folder is read-only, results go to Downloads.
+Results are saved next to the originals with the suffix from the Workflow’s Configuration (`-edited` by default), or replace the originals if you turn that on there. Existing files are never overwritten: a number is added instead. Photos are resized and converted the way they are displayed, so EXIF rotation is respected, animated GIFs keep their frames, and transparency becomes white only in formats without an alpha channel. Colour profiles (such as Display P3), 16-bit depth and the pages of multi-page TIFFs are kept; the HDR gain map of iPhone photos is not, so edited photos are standard dynamic range. When a folder is read-only, results go to Downloads. Turn on “Keep the original dates” in the Workflow’s Configuration to give results the dates of their originals, so they sort next to them.
 
-Convert the video and audio files selected in Finder via the `vid` keyword: MP4 (H.264 or HEVC, with the hardware encoder), WebM, MOV and GIF; extract or convert audio to MP3, M4A, WAV, FLAC or AIFF; compress; resize to 1080p, 720p or 480p; remove the audio track; or trim with `trim 0:10-0:25` (`trim 90-` keeps everything after 1:30).
+Convert the video and audio files selected in Finder via the `vid` keyword: MP4 (H.264 or HEVC, with the hardware encoder), WebM, MOV and GIF; extract or convert audio to MP3, M4A, WAV, FLAC or AIFF; compress; resize to 1080p, 720p or 480p; remove the audio track; or trim with `trim 0:10-0:25` (`trim 90-` keeps everything after 1:30). `gif 0:10-0:15` makes a GIF of just that part.
 
-Conversions run in the background, one file at a time, with a notification when they finish. While they run, the `vid` keyword shows the progress:
+Conversions run in the background, one file at a time, with a notification when they finish. &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; and &lt;kbd&gt;⌥&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; reveal or copy the results once they're done. While they run, the `vid` keyword shows the progress:
 
 * &lt;kbd&gt;↩&lt;/kbd&gt; Cancel the running conversion and the queue.
 * &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Reveal the conversion log in Finder.
@@ -600,6 +631,25 @@ Every keyword, the output suffix, the image quality and the GIF size and frame r
 			<string>checkbox</string>
 			<key>variable</key>
 			<string>replace_originals</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<false/>
+				<key>required</key>
+				<false/>
+				<key>text</key>
+				<string>Keep the original dates</string>
+			</dict>
+			<key>description</key>
+			<string>Results get the modification and creation dates of the original, so they sort next to it.</string>
+			<key>label</key>
+			<string></string>
+			<key>type</key>
+			<string>checkbox</string>
+			<key>variable</key>
+			<string>keep_dates</string>
 		</dict>
 		<dict>
 			<key>config</key>

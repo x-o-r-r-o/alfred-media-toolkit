@@ -43,6 +43,21 @@ reveal() {
     "$@" >/dev/null 2>&1
 }
 
+# Put the results on the clipboard as files (⌥↩)
+copy_files() {
+  if [ -n "$MT_TEST_CLIPBOARD_FILE" ]; then
+    printf '%s\n' "$@" >"$MT_TEST_CLIPBOARD_FILE"
+    return
+  fi
+  [ -n "$MT_TEST" ] && return
+  /usr/bin/osascript -l JavaScript \
+    -e 'ObjC.import("AppKit"); function run(a) { const pb = $.NSPasteboard.generalPasteboard; pb.clearContents; pb.writeObjects($(a.map((p) => $.NSURL.fileURLWithPath(p)))) }' \
+    "$@" >/dev/null 2>&1
+}
+
+# Workflow Configuration checkboxes arrive as "1"/"0"
+checked() { case "$1" in 1 | [Tt][Rr][Uu][Ee] | [Yy][Ee][Ss]) return 0 ;; esac; return 1; }
+
 # Remove a temp file of ours (and its helpers, like a GIF palette); never anything else
 drop_tmp() {
   case "${1##*/}" in
@@ -151,6 +166,11 @@ finish() {
   else
     msg="$n converted, $fails failed · $first"
   fi
+  # rev: 1 reveal the results, 2 copy them to the clipboard
+  if [ "$rev" = 2 ] && [ "$n" -gt 0 ]; then
+    copy_files "${ok[@]}"
+    msg="$msg · copied to the clipboard"
+  fi
   notify "$msg"
   if [ "$rev" = 1 ] && [ "$n" -gt 0 ]; then reveal "${ok[@]}"; fi
 }
@@ -218,6 +238,9 @@ run_job() {
       drop_tmp "$tmp"
       return
     fi
+    # "Keep the original dates": the source's modification date (and so the creation date, which macOS
+    # moves back with it); mv keeps it. Best effort.
+    if [ "$rc" -eq 0 ] && [ -s "$tmp" ] && checked "$keep_dates"; then touch -r "$src" "$tmp" 2>/dev/null; fi
     if [ "$rc" -eq 0 ] && [ -s "$tmp" ] && dest=$(commit "$tmp" "$final" "$replace") && [ -n "$dest" ]; then
       record "$batch" ok "$label" "$dest"
       echo "-> $dest" >>"$log"
@@ -226,7 +249,11 @@ run_job() {
       # The most specific line: the first that looks like an error, else the last one
       reason=$(grep -i -m1 -E 'error|invalid|fail|unable|cannot|no such|not |unknown|denied|matches no streams' "$cache/last.err" 2>/dev/null)
       [ -z "$reason" ] && reason=$(grep -v '^[[:space:]]*$' "$cache/last.err" 2>/dev/null | tail -1)
-      reason=$(printf '%s' "$reason" | sed -E 's/^avconvert: +//; s/ (--|with) file:.*//; s/^[[:space:]]+//' | cut -c1-160)
+      # The source's folder path is noise in a notification: keep its name only
+      [ -n "$src" ] && reason="${reason//"file:$src"/${src##*/}}" && reason="${reason//"$src"/${src##*/}}"
+      # Under Alfred's C locale cut counts bytes and can split a UTF-8 character; iconv -c drops the broken
+      # tail, since osascript turns an argument that isn't valid UTF-8 into undefined (no notification at all)
+      reason=$(printf '%s' "$reason" | sed -E 's/^avconvert: +//; s/ (--|with) file:.*//; s/^[[:space:]]+//' | cut -c1-160 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
       case "$reason" in
         "invalid configuration"*)
           reason="avconvert can't make this format from this file"

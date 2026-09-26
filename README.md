@@ -17,19 +17,20 @@ Edit the images selected in Finder via the `img` keyword. Type what you want aft
 
 * <kbd>↩</kbd> Run the operation.
 * <kbd>⌘</kbd><kbd>↩</kbd> Run the operation, then reveal the results in Finder.
+* <kbd>⌥</kbd><kbd>↩</kbd> Run the operation, then copy the results to the clipboard, ready to paste into a message or another folder.
 * <kbd>⌘</kbd><kbd>Y</kbd> Quick Look the first selected file.
 * <kbd>⌘</kbd><kbd>C</kbd> Copy the paths of the selected files.
 * <kbd>⌘</kbd><kbd>L</kbd> Show the selected file names.
 
 A selected folder stands for the images, videos and audio files directly inside it.
 
-Results are saved next to the originals with the suffix from the Workflow’s Configuration (`-edited` by default), or replace the originals if you turn that on there. Existing files are never overwritten: a number is added instead. Photos are resized and converted the way they are displayed, so EXIF rotation is respected, animated GIFs keep their frames, and transparency becomes white only in formats without an alpha channel. Colour profiles (such as Display P3), 16-bit depth and the pages of multi-page TIFFs are kept; the HDR gain map of iPhone photos is not, so edited photos are standard dynamic range. When a folder is read-only, results go to Downloads.
+Results are saved next to the originals with the suffix from the Workflow’s Configuration (`-edited` by default), or replace the originals if you turn that on there. Existing files are never overwritten: a number is added instead. Photos are resized and converted the way they are displayed, so EXIF rotation is respected, animated GIFs keep their frames, and transparency becomes white only in formats without an alpha channel. Colour profiles (such as Display P3), 16-bit depth and the pages of multi-page TIFFs are kept; the HDR gain map of iPhone photos is not, so edited photos are standard dynamic range. When a folder is read-only, results go to Downloads. Turn on “Keep the original dates” in the Workflow’s Configuration to give results the dates of their originals, so they sort next to them.
 
-Convert the video and audio files selected in Finder via the `vid` keyword: MP4 (H.264 or HEVC, with the hardware encoder), WebM, MOV and GIF; extract or convert audio to MP3, M4A, WAV, FLAC or AIFF; compress; resize to 1080p, 720p or 480p; remove the audio track; or trim with `trim 0:10-0:25` (`trim 90-` keeps everything after 1:30).
+Convert the video and audio files selected in Finder via the `vid` keyword: MP4 (H.264 or HEVC, with the hardware encoder), WebM, MOV and GIF; extract or convert audio to MP3, M4A, WAV, FLAC or AIFF; compress; resize to 1080p, 720p or 480p; remove the audio track; or trim with `trim 0:10-0:25` (`trim 90-` keeps everything after 1:30). `gif 0:10-0:15` makes a GIF of just that part.
 
 ![Converting a video](images/vid.png)
 
-Conversions run in the background, one file at a time, with a notification when they finish. While they run, the `vid` keyword shows the progress:
+Conversions run in the background, one file at a time, with a notification when they finish. <kbd>⌘</kbd><kbd>↩</kbd> and <kbd>⌥</kbd><kbd>↩</kbd> reveal or copy the results once they're done. While they run, the `vid` keyword shows the progress:
 
 * <kbd>↩</kbd> Cancel the running conversion and the queue.
 * <kbd>⌘</kbd><kbd>↩</kbd> Reveal the conversion log in Finder.

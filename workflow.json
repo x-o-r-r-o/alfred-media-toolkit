@@ -68,6 +68,17 @@
       }
     },
     {
+      "type": "checkbox",
+      "variable": "keep_dates",
+      "label": "",
+      "description": "Results get the modification and creation dates of the original, so they sort next to it.",
+      "config": {
+        "default": false,
+        "required": false,
+        "text": "Keep the original dates"
+      }
+    },
+    {
       "type": "popupbutton",
       "variable": "image_quality",
       "label": "Quality",
@@ -277,6 +288,11 @@
       "mod": "cmd"
     },
     {
+      "from": "sf_img",
+      "to": "action",
+      "mod": "alt"
+    },
+    {
       "from": "sf_vid",
       "to": "action"
     },
@@ -286,6 +302,11 @@
       "mod": "cmd"
     },
     {
+      "from": "sf_vid",
+      "to": "action",
+      "mod": "alt"
+    },
+    {
       "from": "sf_media",
       "to": "action"
     },
@@ -293,6 +314,11 @@
       "from": "sf_media",
       "to": "action",
       "mod": "cmd"
+    },
+    {
+      "from": "sf_media",
+      "to": "action",
+      "mod": "alt"
     },
     {
       "from": "action",

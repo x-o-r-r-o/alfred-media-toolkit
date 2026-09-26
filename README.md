@@ -18,6 +18,7 @@ Edit the images selected in Finder via the `img` keyword. Type what you want aft
 * <kbd>↩</kbd> Run the operation.
 * <kbd>⌘</kbd><kbd>↩</kbd> Run the operation, then reveal the results in Finder.
 * <kbd>⌘</kbd><kbd>Y</kbd> Quick Look the first selected file.
+* <kbd>⌘</kbd><kbd>C</kbd> Copy the paths of the selected files.
 * <kbd>⌘</kbd><kbd>L</kbd> Show the selected file names.
 
 A selected folder stands for the images, videos and audio files directly inside it.
@@ -28,7 +29,12 @@ Convert the video and audio files selected in Finder via the `vid` keyword: MP4 
 
 ![Converting a video](images/vid.png)
 
-Conversions run in the background, one file at a time, with a notification when they finish. While they run, the `vid` keyword shows the progress: <kbd>↩</kbd> cancels, <kbd>⌘</kbd><kbd>↩</kbd> reveals the log.
+Conversions run in the background, one file at a time, with a notification when they finish. While they run, the `vid` keyword shows the progress:
+
+* <kbd>↩</kbd> Cancel the running conversion and the queue.
+* <kbd>⌘</kbd><kbd>↩</kbd> Reveal the conversion log in Finder.
+
+![A conversion in progress](images/progress.png)
 
 HEVC keeps HDR video in 10 bits. The other formats are 8-bit without tone mapping, so HDR clips can look washed out in some players.
 

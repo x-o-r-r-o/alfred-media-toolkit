@@ -14,16 +14,24 @@ fi
 
 case "$op" in
   copy)
-    if [ -n "$MT_TEST_CLIPBOARD_FILE" ]; then printf '%s' "$1" >"$MT_TEST_CLIPBOARD_FILE"; else printf '%s' "$1" | /usr/bin/pbcopy; fi
+    # MT_TEST (the tests): never the real clipboard
+    if [ -n "$MT_TEST_CLIPBOARD_FILE" ]; then printf '%s' "$1" >"$MT_TEST_CLIPBOARD_FILE"; elif [ -z "$MT_TEST" ]; then printf '%s' "$1" | /usr/bin/pbcopy; fi
     echo "Copied “$1”: paste it into Terminal"
     ;;
   cancel)
+    # The worker stops quietly: this is the one notification
     ./worker.sh --cancel
     ;;
   log)
     log="$cache/conversions.log"
     [ -e "$log" ] || log="$cache/media-toolkit.log"
-    if [ -e "$log" ]; then /usr/bin/open -R "$log"; else echo "No log yet"; fi
+    if [ ! -e "$log" ]; then
+      echo "No log yet"
+    elif [ -n "$MT_TEST_REVEAL_FILE" ]; then
+      printf '%s\n' "$log" >"$MT_TEST_REVEAL_FILE"
+    elif [ -z "$MT_TEST" ]; then
+      /usr/bin/open -R "$log"
+    fi
     ;;
   resize:* | convert:* | rotate:* | flip:* | strip:* | optimize | removebg | removebg:*)
     mkdir -p "$cache"
@@ -39,6 +47,8 @@ case "$op" in
         if [ -n "$MT_TEST_WORKER_FOREGROUND" ]; then
           ./worker.sh
         else
+          # set -m: its own process group, so it outlives Alfred ending this script's group
+          set -m
           nohup ./worker.sh </dev/null >/dev/null 2>&1 &
         fi
         ;;

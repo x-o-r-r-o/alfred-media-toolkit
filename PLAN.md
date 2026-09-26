@@ -23,6 +23,26 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 - [x] Batch on multiple selected files; output next to source with suffix or replace originals; never clobber; read-only folders fall back to Downloads
 - [ ] Optional TinyPNG compress when API key set (deferred: v1 stays offline)
 
+## Known limitations
+- The HDR gain map of iPhone photos is dropped: edited photos are standard dynamic range. HDR video keeps 10 bits only with HEVC; other formats are 8-bit without tone mapping.
+- Background removal needs macOS 14 (Vision's foreground instance mask); it is hidden on macOS 13.
+- WebP and AVIF output depends on what ImageIO on that macOS version can encode (checked at runtime).
+- Without ffmpeg only QuickTime/MP4 video (avconvert) and Core Audio formats (afconvert) are handled; WebM, GIF, MP3, compress and mute need ffmpeg.
+- Folders expand one level deep, up to 5,000 media files.
+- Cancelling stops the running conversion and clears the queue; files of that batch already converted are kept but not announced.
+- The Universal Action receives tab-separated paths, so a file name that contains a tab or newline is split (very rare).
+- Only the first frame of an animated GIF/HEICS is used when the output format can't animate; only the first page of a multi-page file unless it stays TIFF.
+
+## Verify in real Alfred
+- [ ] First run asks for Automation permission for Finder; the "Can't read the Finder selection" item appears when it is denied.
+- [ ] Typing after the keyword doesn't query Finder again (`mt_sel` is passed back between keystrokes).
+- [ ] The Universal Action on 1 and on many files (tab-separated `{query}`), and on a folder.
+- [ ] <kbd>⌘</kbd><kbd>↩</kbd> reveals results; <kbd>⌘</kbd><kbd>Y</kbd>, <kbd>⌘</kbd><kbd>C</kbd>, <kbd>⌘</kbd><kbd>L</kbd> on an operation row.
+- [ ] A long conversion keeps running after Alfred closes (own process group); the `vid` progress row refreshes (`rerun`), ↩ cancels with one notification, ⌘↩ reveals the log.
+- [ ] The "finished" notification arrives through the External Trigger.
+- [ ] ffmpeg from Homebrew is found although Alfred's PATH lacks /opt/homebrew/bin.
+- [ ] 10+ images show the early "Processing…" notification.
+
 ## Tech
 - **Stack:** bash + JXA using the ObjC bridge to ImageIO, CoreGraphics, CoreImage and Vision (no compiled binary to sign and notarise).
 - **Dependencies:** ffmpeg optional (for video); `avconvert` and `afconvert` ship with macOS.
@@ -50,5 +70,6 @@ Sources: alfred.app/submit, alfred.app/submit/styleguide, alfred.app/submit/scre
 - [x] Any compiled binary is Developer ID signed + notarised; never strip quarantine (there is none)
 - [x] No hard-coded paths; `prefs.plist` is git-ignored; secrets stay in Keychain
 - [ ] AI assistance disclosed in the README and the forum post
+- [ ] Sync `tools/build.py` from alfred-devtoolbox (it lacks the audited fixes, e.g. `argumenttreatemptyqueryasnil`), then rebuild
 - [ ] Version bumped in `workflow.json`; `python3 tools/build.py --package`; GitHub release with the `.alfredworkflow` attached
 - [ ] Forum post in "Share your Workflows" with a screenshot, keywords, and the GitHub link

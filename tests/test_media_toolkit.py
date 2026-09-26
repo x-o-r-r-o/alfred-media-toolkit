@@ -30,9 +30,12 @@ def tearDownModule():
 
 
 def base_env(**extra):
-    e = dict(os.environ, alfred_workflow_cache=CACHE, alfred_workflow_bundleid="io.github.x-o-r-r-o.media-toolkit",
+    # MT_TEST: the safety net. Without an override the scripts never read the real Finder selection or
+    # clipboard, never call Alfred, never open Finder windows and never write to the real Downloads folder
+    e = dict(os.environ, MT_TEST="1", alfred_workflow_cache=CACHE, alfred_workflow_bundleid="io.github.x-o-r-r-o.media-toolkit",
              MT_TEST_NOTIFY_FILE=os.path.join(CACHE, "notify.txt"), MT_TEST_REVEAL_FILE=os.path.join(CACHE, "reveal.txt"))
-    for k in ("output_suffix", "replace_originals", "image_quality", "mt_files", "mt_op", "mt_reveal", "mt_ua_files"):
+    for k in ("output_suffix", "replace_originals", "image_quality", "mt_files", "mt_op", "mt_reveal", "mt_ua_files", "mt_sel",
+              "ffmpeg_path", "MT_TEST_SELECTION", "MT_TEST_SELECTION_SCRIPT", "MT_TEST_FALLBACK_DIR", "MT_TEST_CLIPBOARD_FILE"):
         e.pop(k, None)
     e.update({k: str(v) for k, v in extra.items()})
     return e
@@ -863,7 +866,7 @@ class QueueTests(Base):
         self.assertFalse(os.path.exists(tmp))
         self.assertFalse(os.path.exists(self.p("out.mov")))
         self.assertFalse(os.path.exists(lock))
-        self.assertEqual(notifications(), ["Cancelled the conversions"])
+        self.assertEqual(notifications(), [])  # the cancel action shows the one notification
         self.assertEqual([f for f in os.listdir(os.path.join(CACHE, "queue")) if f.endswith(".job")], [])
 
     def test_trim_progress_uses_trim_length(self):
@@ -1176,7 +1179,7 @@ class AuditQueueTests(QueueTests):
         subprocess.run(["./worker.sh", "--cancel"], cwd=SRC, env=base_env(), capture_output=True)
         self.write_job(["/bin/sh", "-c", 'echo b > "$0"', self.p(".mt-test.out")], batch="b")
         self.assertEqual(w.wait(timeout=20), 0)
-        self.assertEqual(notifications(), ["Cancelled the conversions", "Converted fake ü.mov → out.mov"])
+        self.assertEqual(notifications(), ["Converted fake ü.mov → out.mov"])
         with open(self.p("out.mov")) as f:
             self.assertEqual(f.read().strip(), "b")  # the cancelled one was never saved
 
@@ -1315,6 +1318,71 @@ class AuditMiscTests(Base):
         data = json.loads(out.stdout)
         nfc = lambda x: unicodedata.normalize("NFC", x)  # file URLs come back decomposed; both open the same file
         self.assertEqual([nfc(x) for x in json.loads(data["variables"]["mt_sel"])], [nfc(os.path.realpath(a)), nfc(os.path.realpath(b))])
+
+    # ---- regressions from the final review
+    def test_prototype_keys_in_queries(self):
+        jpg = make(self.p("a.jpg"))
+        for q in ("constructor", "__proto__", "to constructor", "convert to __proto__", "hasownproperty"):
+            it = items("img", q, [jpg])
+            self.assertNotEqual(it[0]["title"], "Media Toolkit error", (q, it))
+        self.assertIn("unknown format", act("convert:constructor", [jpg]))
+        odd = self.p("x.constructor")
+        open(odd, "w").close()
+        self.assertEqual(items("img", "", [odd])[0]["title"], "Select images in Finder first")
+
+    def test_control_and_bidi_characters_in_titles(self):
+        name = "a\u202egpj.exe\nb\tc.jpg"
+        jpg = make(self.p(name))
+        for it in items("img", "", [jpg]):
+            for field in (it["title"], it["subtitle"]):
+                self.assertFalse(any(unicodedata.category(ch) in ("Cc",) or ch in "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069" for ch in field), field)
+            self.assertEqual(json.loads(it["variables"]["mt_files"]), [jpg])  # the real path is untouched
+        mov = self.p("m\u202eov.mov")
+        open(mov, "w").close()
+        self.assertEqual(items("vid", "trim 1-2", [mov], MT_TEST_FFMPEG="/f/ffmpeg")[0]["title"], "Trim mov.mov from 0:01 to 0:02")
+
+    def test_test_mode_never_touches_real_state(self):
+        # no selection override: Finder is not asked
+        self.assertEqual(items("img", "")[0]["title"], "Select images in Finder first")
+        self.assertEqual(items("vid", "", MT_TEST_FFMPEG="none")[-1]["title"], "Select video or audio files in Finder first")
+        self.assertEqual(items("all", "")[0]["title"], "Select images, videos or audio in Finder first")
+        # no clipboard override: pbcopy is not run (the message still comes back)
+        e = base_env(mt_op="copy", mt_files="[]")
+        out = subprocess.run(["./action.sh", "brew install ffmpeg"], cwd=SRC, env=e, capture_output=True, text=True).stdout
+        self.assertIn("Copied", out)
+        # read-only folder without a fallback override: the result goes to the cache, not ~/Downloads
+        ro = os.path.join(self.dir, "ro")
+        os.makedirs(ro)
+        src = make(os.path.join(ro, "a.jpg"))
+        os.chmod(ro, 0o555)
+        e = base_env(mt_op="resize:pct:50", mt_files=json.dumps([src]))
+        e.pop("MT_TEST_FALLBACK_DIR", None)
+        subprocess.run(["./action.sh", "resize:pct:50"], cwd=SRC, env=e, capture_output=True, text=True)
+        self.assertTrue(os.path.exists(os.path.join(CACHE, "a-edited.jpg")))
+        os.remove(os.path.join(CACHE, "a-edited.jpg"))
+
+    def test_log_action_reveals_in_test_file(self):
+        log = os.path.join(CACHE, "conversions.log")
+        open(log, "a").close()
+        act("log", [])
+        with open(os.path.join(CACHE, "reveal.txt")) as f:
+            self.assertEqual(f.read().strip(), log)
+
+    def test_progress_without_selection_shows_only_the_progress_row(self):
+        lock = os.path.join(CACHE, "worker.lock")
+        os.makedirs(lock, exist_ok=True)
+        fake = subprocess.Popen(["/bin/bash", "-c", "exec -a worker.sh /bin/sleep 30"])
+        self.addCleanup(fake.wait)
+        self.addCleanup(fake.kill)
+        try:
+            with open(os.path.join(lock, "pid"), "w") as f:
+                f.write(str(fake.pid))
+            with open(os.path.join(lock, "state"), "w") as f:
+                f.write("0\nclip.mov\navconvert\n")
+            titles = [i["title"] for i in items("vid", "", [], MT_TEST_FFMPEG="none")]
+            self.assertEqual(titles, ["Converting clip.mov…", "Select video or audio files in Finder first"])
+        finally:
+            shutil.rmtree(lock, ignore_errors=True)
 
     def test_errors_log_is_trimmed(self):
         log = os.path.join(CACHE, "errors.log")

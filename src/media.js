@@ -17,6 +17,17 @@ function env(name, fallback) {
   return v.isNil() ? fallback : v.js;
 }
 const FM = $.NSFileManager.defaultManager;
+// Set by the tests: nothing real (Finder selection, Alfred, Finder windows, Downloads) is touched without an override
+const TEST = env("MT_TEST", "") !== "";
+
+// Look up a user-controlled key (query, file extension) without hitting Object.prototype ("constructor", "__proto__")
+function lookup(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+}
+// Display text: no control characters or bidi overrides (a file name can hold both); the real value stays in arg
+function clean(s) {
+  return String(s).replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/[\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]/g, "");
+}
 
 // ---------- file types ----------
 
@@ -64,7 +75,8 @@ function exists(p) {
 
 function suffix() {
   // No path separators or colons in the suffix; an empty suffix is allowed.
-  return env("output_suffix", "-edited").replace(/[\/:\0\n\r\t]/g, "").slice(0, 60);
+  // (sliced by code point, so an emoji is never cut in half)
+  return Array.from(env("output_suffix", "-edited").replace(/[\/:\0\n\r\t]/g, "")).slice(0, 60).join("");
 }
 function replaceOriginals() {
   return env("replace_originals", "0") === "1";
@@ -81,6 +93,7 @@ function cacheDir() {
 function fallbackDir() {
   const t = env("MT_TEST_FALLBACK_DIR", "");
   if (t) return t;
+  if (TEST) return cacheDir();
   const u = FM.URLsForDirectoryInDomains(15 /* NSDownloadsDirectory */, 1 /* user */).firstObject;
   return u.isNil() ? $.NSHomeDirectory().js : u.path.js;
 }
@@ -109,7 +122,7 @@ function plannedOutput(src, ext, opts = {}) {
 }
 function normExt(e) {
   e = String(e).toLowerCase();
-  return { jpeg: "jpg", jpe: "jpg", jfif: "jpg", tif: "tiff", heif: "heic", hif: "heic", aif: "aiff", aifc: "aiff", wave: "wav", qt: "mov" }[e] || e;
+  return lookup({ jpeg: "jpg", jpe: "jpg", jfif: "jpg", tif: "tiff", heif: "heic", hif: "heic", aif: "aiff", aifc: "aiff", wave: "wav", qt: "mov" }, e) || e;
 }
 function uniquePath(dir, stem, ext, taken = []) {
   const make = (n) => `${dir}/${stem}${n > 1 ? `-${n}` : ""}${ext ? "." + ext : ""}`;
@@ -219,7 +232,7 @@ function encodableFormats() {
   return encodableCache;
 }
 function formatOfFile(p) {
-  return FORMAT_ALIASES[normExt(extOf(p))] || null;
+  return lookup(FORMAT_ALIASES, normExt(extOf(p))) || null;
 }
 
 function backgroundRemovalAvailable() {
@@ -451,6 +464,7 @@ function processImage(path, op) {
 
   // Output format: the source's own format when it can be written, otherwise PNG/JPEG
   let fmtKey = kind === "convert" ? args[0] : srcFmt;
+  if (kind === "convert" && !lookup(FORMATS, fmtKey)) throw new Error(`unknown format ${fmtKey}`);
   if (kind === "convert" && srcFmt === fmtKey) return { skipped: `already ${FORMATS[fmtKey].name}` };
   if (!fmtKey || !encodableFormats().includes(fmtKey)) {
     if (kind === "convert") throw new Error(`this Mac can't write ${FORMATS[fmtKey] ? FORMATS[fmtKey].name : fmtKey}`);
@@ -827,6 +841,7 @@ function notifyAlfred(msg) {
     $(prev + msg + "\n").writeToFileAtomicallyEncodingError(t, true, $.NSUTF8StringEncoding, $());
     return;
   }
+  if (TEST) return;
   try {
     Application("com.runningwithcrayons.Alfred").runTrigger("notify", { inWorkflow: env("alfred_workflow_bundleid", ""), withArgument: msg });
   } catch (e) {
@@ -840,6 +855,7 @@ function reveal(paths) {
     $(paths.join("\n")).writeToFileAtomicallyEncodingError(t, true, $.NSUTF8StringEncoding, $());
     return;
   }
+  if (TEST) return;
   $.NSWorkspace.sharedWorkspace.activateFileViewerSelectingURLs($(paths.map((p) => $.NSURL.fileURLWithPath(p))));
 }
 
@@ -1258,7 +1274,7 @@ function workerStatus() {
   if (!n || !isWorker(n)) return null;
   const state = (readText(`${cache}/worker.lock/state`) || "").split("\n");
   const duration = parseFloat(state[0]) || 0;
-  const label = state[1] || "";
+  const label = clean(state[1] || "");
   const tool = state[2] || "";
   let pct = null;
   // Only the end of the file: ffmpeg appends a block twice a second, megabytes for a long movie
@@ -1297,6 +1313,7 @@ function finderSelection() {
   // One Apple Event for the whole selection: asking each item for its URL costs an event per file
   // (seconds for a few hundred files)
   const testScript = env("MT_TEST_SELECTION_SCRIPT", "");
+  if (TEST && !testScript) return [];
   const paths = aliasListPaths(testScript || 'tell application id "com.apple.finder" to return selection as alias list');
   if (paths || testScript) return paths;
   try {
@@ -1338,7 +1355,7 @@ function uaFiles() {
 }
 
 function describe(files) {
-  const first = baseName(files[0]);
+  const first = clean(baseName(files[0]));
   return files.length === 1 ? first : `${first} + ${files.length - 1} more`;
 }
 function plural(n, word) {
@@ -1410,7 +1427,7 @@ function imageItems(files, query) {
     if (![90, 180, 270].includes(d)) return [info("Rotate by 90, 180 or 270 degrees", "Negative angles rotate to the left, e.g. rotate -90", "error")];
     return [opItem(`Rotate ${noun} ${d === 270 ? "90° left" : d === 90 ? "90° right" : "180°"}`, "Clockwise angle " + d + "°", `rotate:${d}`, files, "rotate")];
   }
-  const fmtAsked = FORMAT_ALIASES[q.replace(/^(?:convert\s+(?:to\s+)?|to\s+)/, "")];
+  const fmtAsked = lookup(FORMAT_ALIASES, q.replace(/^(?:convert\s+(?:to\s+)?|to\s+)/, ""));
   if (fmtAsked && files.every((f) => formatOfFile(f) === fmtAsked)) {
     return [info(`Already ${FORMATS[fmtAsked].name}`, `Try optimize to re-encode at quality ${Math.round(quality() * 100)}%`, "info", { autocomplete: "optimize" })];
   }
@@ -1485,7 +1502,7 @@ function avItems(files, query) {
         : installItem("Trimming these files needs ffmpeg")]);
     }
     const id = `trim:${fmtTime(r.start).replace(/:/g, "_")}-${r.end === null ? "" : fmtTime(r.end).replace(/:/g, "_")}`;
-    return items.concat([opItem(`Trim ${usable.length === 1 ? baseName(usable[0]) : plural(usable.length, "file")} from ${fmtTime(r.start)} to ${r.end === null ? "the end" : fmtTime(r.end)}`,
+    return items.concat([opItem(`Trim ${usable.length === 1 ? clean(baseName(usable[0])) : plural(usable.length, "file")} from ${fmtTime(r.start)} to ${r.end === null ? "the end" : fmtTime(r.end)}`,
       "Frame-accurate, re-encoded", id, usable, "trim")]);
   }
 
@@ -1587,7 +1604,7 @@ function scriptFilter(mode, query) {
     if (!avs.length) {
       const st = workerStatus();
       const res = [];
-      if (st) res.push(...avItems([], "", []));
+      if (st) res.push(...avItems([], "").filter((i) => i.arg === "cancel")); // only the progress row
       res.push(images.length
         ? info("No video or audio selected", `Use the ${env("keyword_img", "img")} keyword for images`, "info")
         : info("Select video or audio files in Finder first", "Then pick a format, e.g. mp4, gif, mp3, compress or trim 0:10-0:25", "info"));

@@ -26,6 +26,7 @@ notify() {
     printf '%s\n' "$1" >>"$MT_TEST_NOTIFY_FILE"
     return
   fi
+  [ -n "$MT_TEST" ] && return # the tests never reach the real Alfred
   /usr/bin/osascript -l JavaScript \
     -e 'function run(a) { Application("com.runningwithcrayons.Alfred").runTrigger("notify", { inWorkflow: a[0], withArgument: a[1] }) }' \
     "$alfred_workflow_bundleid" "$1" >/dev/null 2>&1
@@ -36,6 +37,7 @@ reveal() {
     printf '%s\n' "$@" >"$MT_TEST_REVEAL_FILE"
     return
   fi
+  [ -n "$MT_TEST" ] && return
   /usr/bin/osascript -l JavaScript \
     -e 'ObjC.import("AppKit"); function run(a) { $.NSWorkspace.sharedWorkspace.activateFileViewerSelectingURLs($(a.map((p) => $.NSURL.fileURLWithPath(p)))) }' \
     "$@" >/dev/null 2>&1
@@ -243,10 +245,10 @@ run_job() {
   [ "$idx" = "$count" ] && finish "$batch" "$rev"
 }
 
-# A cancel request: the running job has stopped; forget the cancelled batches and say so
+# A cancel request: the running job has stopped; forget the cancelled batches. No notification: the
+# cancel action already showed one ("Cancelled the conversions")
 handle_cancel() {
   rm -f "$lock/cancel" "$batches"/*
-  notify "Cancelled the conversions"
 }
 
 acquire || exit 0

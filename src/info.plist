@@ -3,24 +3,98 @@
 <plist version="1.0">
 <dict>
 	<key>bundleid</key>
-	<string>com.xorro.media-toolkit</string>
-	<key>name</key>
-	<string>Media Toolkit</string>
-	<key>description</key>
-	<string>Resize, convert, rotate, compress images and video; remove image backgrounds offline.</string>
-	<key>createdby</key>
-	<string>xorro</string>
-	<key>version</key>
-	<string>0.1.0</string>
-	<key>readme</key>
-	<string>See README.md</string>
-	<key>objects</key>
-	<array/>
+	<string>io.github.x-o-r-r-o.media-toolkit</string>
+	<key>category</key>
+	<string>Productivity</string>
 	<key>connections</key>
 	<dict/>
+	<key>createdby</key>
+	<string>x-o-r-r-o</string>
+	<key>description</key>
+	<string>Resize, convert, rotate, compress images and video; remove image backgrounds offline.</string>
+	<key>name</key>
+	<string>Media Toolkit</string>
+	<key>objects</key>
+	<array/>
+	<key>readme</key>
+	<string># Media Toolkit
+
+Resize, convert, rotate, compress images and video; remove image backgrounds offline.
+
+&gt; **Status:** planned — not yet functional. See [PLAN.md](PLAN.md).
+
+## Usage
+
+Resize, convert, rotate, compress images and video; remove image backgrounds offline via the `img` keyword.
+
+![Media Toolkit results in Alfred](images/img.png)
+
+* &lt;kbd&gt;↩&lt;/kbd&gt; Primary action.
+* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Secondary action.
+* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;Y&lt;/kbd&gt; Quick Look.
+
+Every keyword can be changed in the Workflow’s Configuration.
+
+## Development
+
+```bash
+./build.sh   # -&gt; dist/alfred-media-toolkit-&lt;version&gt;.alfredworkflow
+```
+
+## AI disclosure
+
+This workflow is developed with the help of Claude (Anthropic), an AI assistant. All code is reviewed and tested by the author.
+</string>
 	<key>uidata</key>
 	<dict/>
 	<key>userconfigurationconfig</key>
-	<array/>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>img</string>
+				<key>placeholder</key>
+				<string>img</string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string></string>
+			<key>label</key>
+			<string>Img keyword</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>keyword_img</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>vid</string>
+				<key>placeholder</key>
+				<string>vid</string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string></string>
+			<key>label</key>
+			<string></string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>keyword_vid</string>
+		</dict>
+	</array>
+	<key>version</key>
+	<string>0.1.0</string>
+	<key>webaddress</key>
+	<string>https://github.com/x-o-r-r-o/alfred-media-toolkit</string>
 </dict>
 </plist>

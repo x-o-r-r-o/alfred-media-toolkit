@@ -21,10 +21,14 @@ case "$op" in
     if [ -e "$log" ]; then /usr/bin/open -R "$log"; else echo "No log yet"; fi
     ;;
   resize:* | convert:* | rotate:* | flip:* | strip:* | optimize | removebg | removebg:*)
-    /usr/bin/osascript -l JavaScript ./media.js apply "$op"
+    mkdir -p "$cache"
+    msg=$(/usr/bin/osascript -l JavaScript ./media.js apply "$op" 2>>"$cache/errors.log")
+    echo "${msg:-Media Toolkit failed: see $cache/errors.log}"
     ;;
   mp4 | hevc | webm | mov | gif | compress:* | scale:* | mute | mp3 | m4a | wav | flac | aiff | trim:*)
-    msg=$(/usr/bin/osascript -l JavaScript ./media.js enqueue "$op")
+    mkdir -p "$cache"
+    msg=$(/usr/bin/osascript -l JavaScript ./media.js enqueue "$op" 2>>"$cache/errors.log")
+    msg="${msg:-Media Toolkit failed: see $cache/errors.log}"
     case "$msg" in
       Queued*)
         if [ -n "$MT_TEST_WORKER_FOREGROUND" ]; then

@@ -164,7 +164,9 @@ class ScriptFilterTests(Base):
         jpg = make(self.p("a.jpg"))
         self.assertEqual(items("vid", selection=[jpg], MT_TEST_FFMPEG="none")[-1]["title"], "No video or audio selected")
         self.assertEqual(items("vid", selection=[], MT_TEST_FFMPEG="none")[-1]["title"], "Select video or audio files in Finder first")
-        self.assertEqual(items("img", selection=[self.d])[0]["title"], "Select images in Finder first")  # folders are ignored
+        empty = self.p("empty folder")
+        os.makedirs(empty)
+        self.assertEqual(items("img", selection=[empty])[0]["title"], "Select images in Finder first")  # nothing inside
 
     def test_default_image_list(self):
         jpg = make(self.p("photo é.jpg"))
@@ -225,6 +227,32 @@ class ScriptFilterTests(Base):
         e = base_env(mt_op="rotate:90", mt_files="@" + self.p("list.json"))
         msg = subprocess.run(["./action.sh", "rotate:90"], cwd=SRC, env=e, capture_output=True, text=True).stdout.strip()
         self.assertEqual(msg, "No files to process")
+
+    # ---- regressions from audit pass 3
+    def test_folders_expand_to_their_media(self):
+        folder = self.p("album")
+        os.makedirs(os.path.join(folder, "sub"))
+        b, a = make(os.path.join(folder, "b.png"), "public.png"), make(os.path.join(folder, "a.jpg"))
+        make(os.path.join(folder, ".hidden.jpg"))
+        make(os.path.join(folder, "sub", "deep.jpg"))
+        open(os.path.join(folder, "clip.mov"), "w").close()
+        open(os.path.join(folder, "notes.txt"), "w").close()
+        it = items("img", "50%", [folder])
+        self.assertEqual(json.loads(it[0]["variables"]["mt_files"]), [a, b])
+        it = items("all", "mp4", mt_ua_files=folder, MT_TEST_FFMPEG="/f/ffmpeg")
+        self.assertEqual(json.loads(it[0]["variables"]["mt_files"]), [os.path.join(folder, "clip.mov")])
+
+    def test_selection_is_remembered_for_the_session(self):
+        a, b = make(self.p("a.jpg")), make(self.p("b.jpg"))
+        data = sf("img", "", [a])
+        self.assertEqual(json.loads(data["variables"]["mt_sel"]), [a])
+        # Alfred passes the variable back while typing: Finder isn't asked again
+        it = items("img", "50%", [b], mt_sel=data["variables"]["mt_sel"])
+        self.assertEqual(json.loads(it[0]["variables"]["mt_files"]), [a])
+        self.assertEqual(it[0]["quicklookurl"], a)
+
+    def test_media_keyword_without_selection(self):
+        self.assertEqual(items("all", "", [])[0]["title"], "Select images, videos or audio in Finder first")
 
     def test_hostile_queries(self):
         jpg = make(self.p("a.jpg"))
@@ -535,6 +563,25 @@ class ImageTests(Base):
         msg = act("optimize", [small], image_quality=100)
         self.assertEqual(msg, "Nothing to do for small.jpg: already optimized")
         self.assertFalse(os.path.exists(self.p("small-edited.jpg")))
+
+    def test_optimize_keeps_orientation(self):
+        src = make(self.p("o.jpg"), w=600, h=400, noise=True, quality=1.0, orientation=6)
+        act("optimize", [src], image_quality=50)
+        info = probe(self.p("o-edited.jpg"))
+        self.assertEqual((info["width"], info["height"], info["orientation"]), (600, 400, 6))
+
+    def test_action_reports_a_crashed_script(self):
+        # If osascript dies without output, the notification still says something
+        broken = os.path.join(self.dir, "src")
+        shutil.copytree(SRC, broken)
+        with open(os.path.join(broken, "media.js"), "w") as f:
+            f.write("function run() { throw new Error('boom') }\n")
+        e = base_env(mt_op="rotate:90", mt_files="[]")
+        out = subprocess.run(["./action.sh", "rotate:90"], cwd=broken, env=e, capture_output=True, text=True).stdout.strip()
+        self.assertTrue(out.startswith("Media Toolkit failed: see "), out)
+        e = base_env(mt_op="mp4", mt_files="[]")
+        out = subprocess.run(["./action.sh", "mp4"], cwd=broken, env=e, capture_output=True, text=True).stdout.strip()
+        self.assertTrue(out.startswith("Media Toolkit failed: see "), out)
 
     def test_animated_gif(self):
         gif = make(self.p("anim.gif"), "com.compuserve.gif", 200, 100, frames=5, delay=0.3)

@@ -636,9 +636,9 @@ function pruneSelections(dir) {
   }
 }
 
-function filesFromEnv() {
+function filesFromEnv(name = "mt_files") {
   try {
-    let raw = env("mt_files", "[]");
+    let raw = env(name, "[]");
     if (raw.startsWith("@")) {
       const path = raw.slice(1);
       // only lists this workflow wrote
@@ -1072,6 +1072,7 @@ function opItem(title, subtitle, op, files, icon, extra = {}) {
     arg: op,
     valid: true,
     icon: { path: `icons/${icon}.png` },
+    quicklookurl: files[0],
     variables: Object.assign({ mt_reveal: "0" }, vars),
     mods: {
       cmd: { arg: op, valid: true, subtitle: "Run, then reveal the result in Finder", variables: Object.assign({ mt_reveal: "1" }, vars) },
@@ -1252,11 +1253,36 @@ function installItem(sub) {
   };
 }
 
+// Selected folders stand for the media files directly inside them
+function expandFolders(files) {
+  const out = [];
+  for (const f of files) {
+    if (!isDir(f)) {
+      out.push(f);
+      continue;
+    }
+    const list = FM.contentsOfDirectoryAtPathError(f, $());
+    if (list.isNil()) continue;
+    const names = (ObjC.deepUnwrap(list) || []).filter((n) => !n.startsWith(".")).sort((a, b) => a.localeCompare(b));
+    for (const n of names) {
+      const p = `${f}/${n}`;
+      if (kindOf(p) && !isDir(p)) out.push(p);
+      if (out.length >= 5000) break;
+    }
+  }
+  return out;
+}
+
+let sessionFiles = null; // the selection, remembered for the rest of this Alfred session
 function scriptFilter(mode, query) {
   let files = mode === "all" ? uaFiles() : null;
-  if (files === null) files = finderSelection();
-  if (files === null) return [info("Can't read the Finder selection", "Allow Alfred to control Finder in System Settings → Privacy & Security → Automation", "error")];
-  files = [...new Set(files)].filter((f) => !isDir(f));
+  if (files === null && env("mt_sel", "")) files = filesFromEnv("mt_sel");
+  if (files === null) {
+    files = finderSelection();
+    if (files === null) return [info("Can't read the Finder selection", "Allow Alfred to control Finder in System Settings → Privacy & Security → Automation", "error")];
+    sessionFiles = files;
+  }
+  files = expandFolders([...new Set(files)]);
   const images = files.filter((f) => kindOf(f) === "image");
   const avs = files.filter((f) => kindOf(f) === "video" || kindOf(f) === "audio");
   if (mode === "img") {
@@ -1279,7 +1305,11 @@ function scriptFilter(mode, query) {
     return avItems(avs, query);
   }
   // Universal Action: everything that applies to the selection
-  if (!images.length && !avs.length) return [info("No image, video or audio files", files.length ? describe(files) : "", "info")];
+  if (!images.length && !avs.length) {
+    return [files.length
+      ? info("No image, video or audio files", describe(files), "info")
+      : info("Select images, videos or audio in Finder first", "Or use the Universal Action on any files", "info")];
+  }
   const out = [];
   if (images.length) {
     const it = imageItems(images, query);
@@ -1303,8 +1333,11 @@ function run(argv) {
       case "vid":
       case "all": {
         const items = scriptFilter(cmd, query);
-        const busy = items.some((i) => i.arg === "cancel");
-        return output(items, busy ? { rerun: 1 } : {});
+        const extra = {};
+        if (items.some((i) => i.arg === "cancel")) extra.rerun = 1;
+        // Alfred passes these back on every keystroke, so Finder is asked only once per session
+        if (sessionFiles && sessionFiles.length) extra.variables = { mt_sel: filesVar(sessionFiles) };
+        return output(items, extra);
       }
       case "apply": return applyImages(query);
       case "enqueue": return enqueue(query).message;

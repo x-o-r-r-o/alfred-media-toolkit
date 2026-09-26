@@ -17,7 +17,10 @@ Edit the images selected in Finder via the `img` keyword. Type what you want aft
 
 * <kbd>↩</kbd> Run the operation.
 * <kbd>⌘</kbd><kbd>↩</kbd> Run the operation, then reveal the results in Finder.
+* <kbd>⌘</kbd><kbd>Y</kbd> Quick Look the first selected file.
 * <kbd>⌘</kbd><kbd>L</kbd> Show the selected file names.
+
+A selected folder stands for the images, videos and audio files directly inside it.
 
 Results are saved next to the originals with the suffix from the Workflow’s Configuration (`-edited` by default), or replace the originals if you turn that on there. Existing files are never overwritten: a number is added instead. Photos are resized and converted the way they are displayed, so EXIF rotation is respected, animated GIFs keep their frames, and transparency becomes white only in formats without an alpha channel. When a folder is read-only, results go to Downloads.
 

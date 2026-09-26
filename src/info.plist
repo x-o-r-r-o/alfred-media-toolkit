@@ -404,7 +404,7 @@ Edit the images selected in Finder via the `img` keyword. Type what you want aft
 * `rotate 90`, `rotate -90`, `rotate 180` and `flip` turn or mirror the image.
 * `strip` removes EXIF, GPS, camera and XMP metadata without re-compressing, and keeps the photo upright. `location` removes only the GPS data.
 * `optimize` re-encodes at the quality set in the Workflow’s Configuration and keeps the result only if it is smaller.
-* `background` removes the background on-device with Apple’s Vision framework (macOS 14 or later) and saves a transparent PNG, optionally cropped to the subject.
+* `background` removes the background on-device with Apple’s Vision framework (macOS 14 or later) and saves a new transparent PNG (never replacing the original), optionally cropped to the subject.
 
 * &lt;kbd&gt;↩&lt;/kbd&gt; Run the operation.
 * &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Run the operation, then reveal the results in Finder.

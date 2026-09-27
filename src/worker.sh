@@ -27,6 +27,12 @@ notify() {
     return
   fi
   [ -n "$MT_TEST" ] && return # the tests never reach the real Alfred
+  # If Alfred was quit during a long conversion, launch it first: a trigger that launches Alfred is
+  # sometimes lost while it loads its workflows (found in real Alfred)
+  if ! /usr/bin/pgrep -x Alfred >/dev/null; then
+    /usr/bin/open -g -b com.runningwithcrayons.Alfred
+    /bin/sleep 3
+  fi
   /usr/bin/osascript -l JavaScript \
     -e 'function run(a) { Application("com.runningwithcrayons.Alfred").runTrigger("notify", { inWorkflow: a[0], withArgument: a[1] }) }' \
     "$alfred_workflow_bundleid" "$1" >/dev/null 2>&1
@@ -43,7 +49,8 @@ reveal() {
     "$@" >/dev/null 2>&1
 }
 
-# Put the results on the clipboard as files (⌥↩)
+# Put the results on the clipboard as files (⌥↩). The delay lets the pasteboard take every file
+# before osascript exits (without it only the first two or three arrived).
 copy_files() {
   if [ -n "$MT_TEST_CLIPBOARD_FILE" ]; then
     printf '%s\n' "$@" >"$MT_TEST_CLIPBOARD_FILE"
@@ -51,7 +58,7 @@ copy_files() {
   fi
   [ -n "$MT_TEST" ] && return
   /usr/bin/osascript -l JavaScript \
-    -e 'ObjC.import("AppKit"); function run(a) { const pb = $.NSPasteboard.generalPasteboard; pb.clearContents; pb.writeObjects($(a.map((p) => $.NSURL.fileURLWithPath(p)))) }' \
+    -e 'ObjC.import("AppKit"); function run(a) { const pb = $.NSPasteboard.generalPasteboard; pb.clearContents; pb.writeObjects($(a.map((p) => $.NSURL.fileURLWithPath(p)))); delay(0.2) }' \
     "$@" >/dev/null 2>&1
 }
 

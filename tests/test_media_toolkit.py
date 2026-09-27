@@ -1591,6 +1591,15 @@ class PlistTests(unittest.TestCase):
         for f in ("action.sh", "worker.sh"):
             self.assertTrue(os.stat(os.path.join(SRC, f)).st_mode & stat.S_IXUSR)
 
+    def test_copied_files_have_time_to_reach_the_pasteboard(self):
+        # Found in real Alfred: ⌥↩ on 3 images put only 2 on the clipboard, because osascript
+        # exited right after writeObjects. Only the real general pasteboard shows it, so check the source.
+        for f in ("media.js", "worker.sh"):
+            with open(os.path.join(SRC, f), encoding="utf-8") as fh:
+                src = fh.read()
+            after = src.split("writeObjects(", 1)[1][:300]
+            self.assertIn("delay(", after, f)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

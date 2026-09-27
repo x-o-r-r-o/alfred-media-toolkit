@@ -36,12 +36,12 @@ case "$op" in
   resize:* | convert:* | rotate:* | flip:* | strip:* | optimize | removebg | removebg:*)
     mkdir -p "$cache"
     msg=$(/usr/bin/osascript -l JavaScript ./media.js apply "$op" 2>>"$errors")
-    echo "${msg:-Media Toolkit failed: see $errors}"
+    echo "${msg:-Media Toolkit couldn’t finish: see $errors}"
     ;;
   mp4 | hevc | webm | mov | gif | compress:* | scale:* | mute | mp3 | m4a | wav | flac | aiff | trim:*)
     mkdir -p "$cache"
     msg=$(/usr/bin/osascript -l JavaScript ./media.js enqueue "$op" 2>>"$errors")
-    msg="${msg:-Media Toolkit failed: see $errors}"
+    msg="${msg:-Media Toolkit couldn’t finish: see $errors}"
     case "$msg" in
       Queued*)
         if [ -n "$MT_TEST_WORKER_FOREGROUND" ]; then

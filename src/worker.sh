@@ -160,11 +160,11 @@ finish() {
   elif [ "$fails" -eq 0 ]; then
     msg="Converted $n files"
   elif [ "$n" -eq 0 ] && [ "$fails" -eq 1 ]; then
-    msg="Failed: $first"
+    msg="Couldn’t convert $first"
   elif [ "$n" -eq 0 ]; then
-    msg="All $fails conversions failed · $first"
+    msg="Couldn’t convert $fails files · $first"
   else
-    msg="$n converted, $fails failed · $first"
+    msg="$n converted, $fails couldn’t be converted · $first"
   fi
   # rev: 1 reveal the results, 2 copy them to the clipboard
   if [ "$rev" = 2 ] && [ "$n" -gt 0 ]; then
@@ -256,7 +256,7 @@ run_job() {
       reason=$(printf '%s' "$reason" | sed -E 's/^avconvert: +//; s/ (--|with) file:.*//; s/^[[:space:]]+//' | cut -c1-160 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
       case "$reason" in
         "invalid configuration"*)
-          reason="avconvert can't make this format from this file"
+          reason="avconvert can’t make this format from this file"
           [[ "$final" == *.m4a ]] && reason="$reason (no audio track?)"
           ;;
         *"map '0:a"*"matches no streams"*) reason="no audio track" ;;

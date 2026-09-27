@@ -172,7 +172,7 @@ function commit(tmp, plan, src) {
       $.NSURL.fileURLWithPath(plan.path), $.NSURL.fileURLWithPath(tmp), $(), 0, $(), err);
     if (!ok) {
       FM.removeItemAtPathError(tmp, $());
-      throw new Error("could not replace the original");
+      throw new Error("couldn’t replace the original");
     }
     applyDates(plan.path, dates);
     return plan.path;
@@ -188,7 +188,7 @@ function commit(tmp, plan, src) {
     target = uniquePath(dirOf(plan.path), stem, ext);
   }
   FM.removeItemAtPathError(tmp, $());
-  throw new Error("could not save the result");
+  throw new Error("couldn’t save the result");
 }
 
 // ---------- ObjC helpers ----------
@@ -324,7 +324,7 @@ function orientedFrame(info, i, maxSide) {
   if (!maxSide && info.orientation === 1) {
     if (info.width * info.height > MAX_PIXELS) throw new Error(`image too large (${Math.round((info.width * info.height) / 1e6)} MP)`);
     const img = own($.CGImageSourceCreateImageAtIndex(info.src, i, dict({ kCGImageSourceShouldCacheImmediately: true })));
-    if (!img) throw new Error("could not decode the image");
+    if (!img) throw new Error("couldn’t decode the image");
     return img;
   }
   const scale = target / full;
@@ -336,7 +336,7 @@ function orientedFrame(info, i, maxSide) {
     kCGImageSourceShouldCacheImmediately: true,
     kCGImageSourceThumbnailMaxPixelSize: target,
   })));
-  if (!img) throw new Error("could not decode the image");
+  if (!img) throw new Error("couldn’t decode the image");
   return img;
 }
 
@@ -396,7 +396,7 @@ function draw(img, outW, outH, t = {}) {
   }
   $.CGContextDrawImage(ctx, $.CGRectMake(0, 0, dw, dh), img);
   const out = own($.CGBitmapContextCreateImage(ctx));
-  if (!out) throw new Error("could not render the image");
+  if (!out) throw new Error("couldn’t render the image");
   return out;
 }
 
@@ -451,12 +451,12 @@ function gifFrameProps(info, i) {
 function writeFrames(path, fmtKey, frames, fileProps) {
   const fmt = FORMATS[fmtKey];
   const dest = own($.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(path), $(fmt.uti), frames.length, null));
-  if (!dest) throw new Error(`can't write ${fmt.name} here`);
+  if (!dest) throw new Error(`can’t write ${fmt.name} here`);
   if (fileProps) $.CGImageDestinationSetProperties(dest, fileProps);
   for (const f of frames) $.CGImageDestinationAddImage(dest, f.img, f.props);
   if (!$.CGImageDestinationFinalize(dest)) {
     FM.removeItemAtPathError(path, $());
-    throw new Error(`could not write ${fmt.name}`);
+    throw new Error(`couldn’t write ${fmt.name}`);
   }
 }
 
@@ -498,8 +498,8 @@ function processImage(path, op) {
   if (kind === "convert" && !lookup(FORMATS, fmtKey)) throw new Error(`unknown format ${fmtKey}`);
   if (kind === "convert" && srcFmt === fmtKey) return { skipped: `already ${FORMATS[fmtKey].name}` };
   if (!fmtKey || !encodableFormats().includes(fmtKey)) {
-    if (kind === "convert") throw new Error(`this Mac can't write ${FORMATS[fmtKey] ? FORMATS[fmtKey].name : fmtKey}`);
-    if (kind === "optimize") return { skipped: `can't re-encode ${extOf(path).toUpperCase() || "this format"} on this Mac` };
+    if (kind === "convert") throw new Error(`this Mac can’t write ${FORMATS[fmtKey] ? FORMATS[fmtKey].name : fmtKey}`);
+    if (kind === "optimize") return { skipped: `can’t re-encode ${extOf(path).toUpperCase() || "this format"} on this Mac` };
     fmtKey = info.hasAlpha ? "png" : "jpeg"; // e.g. RAW, WebP, PSD sources
     notes.push(`saved as ${FORMATS[fmtKey].name}`);
   }
@@ -521,14 +521,14 @@ function processImage(path, op) {
     if (kind === "optimize" || (kind === "convert" && !flatten && info.orientation === 1 && !fmt.noOrientation)) {
       // Re-encode straight from the source: keeps metadata, orientation, colour profile and depth
       const dest = own($.CGImageDestinationCreateWithURL($.NSURL.fileURLWithPath(tmp), $(fmt.uti), frameCount, null));
-      if (!dest) throw new Error(`can't write ${fmt.name}`);
+      if (!dest) throw new Error(`can’t write ${fmt.name}`);
       if (keepAnim) $.CGImageDestinationSetProperties(dest, dict({ "{GIF}": plain({ LoopCount: loopCount(info) }) }));
       for (let i = 0; i < frameCount; i++) {
         if (kind === "optimize") {
           // ImageIO copies JPEG data untouched when the format doesn't change, so decode and encode again,
           // with every property (orientation, EXIF, GIF frame delays) carried over as it was
           const img = own($.CGImageSourceCreateImageAtIndex(info.src, i, null));
-          if (!img) throw new Error("could not decode the image");
+          if (!img) throw new Error("couldn’t decode the image");
           const props = ObjC.castRefToObject(own($.CGImageSourceCopyPropertiesAtIndex(info.src, i, null))).mutableCopy;
           if (fmt.lossy) props.setObjectForKey(num(quality()), $("kCGImageDestinationLossyCompressionQuality"));
           $.CGImageDestinationAddImage(dest, img, props);
@@ -536,7 +536,7 @@ function processImage(path, op) {
           $.CGImageDestinationAddImageFromSource(dest, info.src, i, dict({ kCGImageDestinationLossyCompressionQuality: fmt.lossy ? quality() : undefined }));
         }
       }
-      if (!$.CGImageDestinationFinalize(dest)) throw new Error(`could not write ${fmt.name}`);
+      if (!$.CGImageDestinationFinalize(dest)) throw new Error(`couldn’t write ${fmt.name}`);
       if (kind === "optimize") {
         const before = fileSize(path), after = fileSize(tmp);
         if (after >= before) {
@@ -675,14 +675,14 @@ function removeBackground(info, crop) {
   const img = orientedFrame(info, 0, null);
   const handler = $.VNImageRequestHandler.alloc.initWithCGImageOptions(img, $());
   const req = $.VNGenerateForegroundInstanceMaskRequest.alloc.init;
-  if (!handler.performRequestsError($([req]), Ref())) throw new Error("Vision could not analyse the image");
+  if (!handler.performRequestsError($([req]), Ref())) throw new Error("Vision couldn’t analyse the image");
   const results = req.results;
   // NSUInteger results arrive from the bridge as strings
   if (results.isNil() || Number(results.count) === 0) throw new Error("no subject found");
   const obs = results.objectAtIndex(0);
   if (Number(obs.allInstances.count) === 0) throw new Error("no subject found");
   const buf = obs.generateMaskedImageOfInstancesFromRequestHandlerCroppedToInstancesExtentError(obs.allInstances, handler, crop, Ref());
-  if (!buf) throw new Error("could not build the mask");
+  if (!buf) throw new Error("couldn’t build the mask");
   const ci = $.CIImage.imageWithCVPixelBuffer(buf);
   if (!ciContext) ciContext = $.CIContext.contextWithOptions($()); // one per run: creating it is slow
   const ctx = ciContext;
@@ -695,7 +695,7 @@ function removeBackground(info, crop) {
     ci, $.NSURL.fileURLWithPath(tmp), format, outCS, $(), Ref());
   if (!ok) {
     FM.removeItemAtPathError(tmp, $());
-    throw new Error("could not write the PNG");
+    throw new Error("couldn’t write the PNG");
   }
   const out = commit(tmp, plan, info.path);
   const ext = ci.extent;
@@ -761,7 +761,7 @@ function applyImages(op) {
   const files = filesFromEnv();
   if (!files.length) return "No files to process";
   const kind = op.split(":")[0];
-  const [verb] = OP_VERBS[kind] || ["Processed"];
+  const [verb, base] = OP_VERBS[kind] || ["Processed", "process"];
   if (env("MT_CHUNK", "") === "1") return JSON.stringify(processFiles(files, op));
   if (files.length >= 10) notifyAlfred(`Processing ${files.length} images…`);
   let res;
@@ -782,7 +782,7 @@ function applyImages(op) {
     copyFiles(done.map(([, r]) => r.out));
     copied = ` · ${done.length === 1 ? "copied" : `${done.length} files copied`} to the clipboard`;
   }
-  return summary(verb, done, failed, skipped, new Set(res.notes)) + copied;
+  return summary(verb, base, done, failed, skipped, new Set(res.notes)) + copied;
 }
 
 function processFiles(files, op) {
@@ -790,7 +790,7 @@ function processFiles(files, op) {
   for (const f of files) {
     try {
       if (!exists(f)) throw new Error("file not found");
-      if (isDir(f)) throw new Error("it's a folder");
+      if (isDir(f)) throw new Error("it’s a folder");
       const r = processImage(f, op);
       if (r.skipped) skipped.push([f, r.skipped]);
       else {
@@ -823,7 +823,7 @@ function runChunk(files, op) {
   t.standardOutput = p;
   t.standardError = $.NSFileHandle.fileHandleWithNullDevice;
   const crashed = (why) => ({ done: [], failed: files.map((f) => [f, why]), skipped: [], notes: [] });
-  if (!t.launchAndReturnError($())) return crashed("could not start");
+  if (!t.launchAndReturnError($())) return crashed("couldn’t start");
   const d = p.fileHandleForReading.readDataToEndOfFile;
   t.waitUntilExit;
   try {
@@ -835,7 +835,7 @@ function runChunk(files, op) {
   return crashed("the image engine crashed");
 }
 
-function summary(verb, done, failed, skipped, notes) {
+function summary(verb, base, done, failed, skipped, notes) {
   const parts = [];
   if (done.length === 1 && !failed.length && !skipped.length) {
     const [f, r] = done[0];
@@ -850,8 +850,8 @@ function summary(verb, done, failed, skipped, notes) {
   }
   if (failed.length) {
     parts.push(failed.length === 1
-      ? `Failed: ${baseName(failed[0][0])}: ${failed[0][1]}`
-      : `${failed.length} failed (${baseName(failed[0][0])}: ${failed[0][1]}…)`);
+      ? `Couldn’t ${base} ${baseName(failed[0][0])}: ${failed[0][1]}`
+      : `Couldn’t ${base} ${failed.length} files (${baseName(failed[0][0])}: ${failed[0][1]}…)`);
   }
   let msg = parts.join(" · ");
   if (notes.size) msg += ` · ${[...notes].join(", ")}`;
@@ -1261,7 +1261,7 @@ function enqueue(opId) {
     const tmp = tempPathFor(plan.path);
     const cmd = buildCommand(tool, opId, f, tmp, kind, `file:${cacheDir()}/progress.txt`, trim);
     if (!cmd) {
-      failed.push(`${baseName(f)}: can't do this with ${tool}`);
+      failed.push(`${baseName(f)}: can’t do this with ${tool}`);
       continue;
     }
     if (plan.note) notes.add(plan.note);
@@ -1486,7 +1486,7 @@ function imageItems(files, query) {
     return [info(`Already ${FORMATS[fmtAsked].name}`, `Try optimize to re-encode at quality ${Math.round(quality() * 100)}%`, "info", { autocomplete: "optimize" })];
   }
   if (fmtAsked && !fmts.includes(fmtAsked)) {
-    return [info(`This Mac can't write ${FORMATS[fmtAsked].name} images`, `ImageIO on this macOS version only encodes ${fmts.map((k) => FORMATS[k].name).join(", ")}`, "error")];
+    return [info(`This Mac can’t write ${FORMATS[fmtAsked].name} images`, `ImageIO on this macOS version only encodes ${fmts.map((k) => FORMATS[k].name).join(", ")}`, "error")];
   }
 
   const all = [];
@@ -1555,7 +1555,7 @@ function avItems(files, query) {
     const usable = targets.filter((f) => toolFor("trim", kindOf(f), extOf(f), ffmpeg));
     if (!usable.length) {
       return items.concat([ffmpeg
-        ? info("Trim: this ffmpeg can't encode it", `It has no ${missingEncoders("trim", kindOf(targets[0]), extOf(targets[0]), ffmpeg).join(" or ")} encoder · reinstall ffmpeg, or pick another build in the Workflow’s Configuration`, "error")
+        ? info("Trim: this ffmpeg can’t encode it", `It has no ${missingEncoders("trim", kindOf(targets[0]), extOf(targets[0]), ffmpeg).join(" or ")} encoder · reinstall ffmpeg, or pick another build in the Workflow’s Configuration`, "error")
         : installItem("Trimming these files needs ffmpeg")]);
     }
     const id = `trim:${fmtTime(r.start).replace(/:/g, "_")}-${r.end === null ? "" : fmtTime(r.end).replace(/:/g, "_")}`;
@@ -1599,7 +1599,7 @@ function avItems(files, query) {
     if (!usable.length) {
       missing.push(op.title);
       const lacks = ffmpeg ? missingEncoders(op.id, kindOf(targets[0]), extOf(targets[0]), ffmpeg) : [];
-      if (lacks.length) items.push(info(`${title}: this ffmpeg can't encode it`, `It has no ${lacks.join(" or ")} encoder · reinstall ffmpeg, or pick another build in the Workflow’s Configuration`, "error"));
+      if (lacks.length) items.push(info(`${title}: this ffmpeg can’t encode it`, `It has no ${lacks.join(" or ")} encoder · reinstall ffmpeg, or pick another build in the Workflow’s Configuration`, "error"));
       continue;
     }
     const count = usable.length === 1 ? "" : ` (${usable.length} files)`;
@@ -1660,7 +1660,7 @@ function scriptFilter(mode, query) {
   if (files === null && env("mt_sel", "")) files = filesFromEnv("mt_sel");
   if (files === null) {
     files = finderSelection();
-    if (files === null) return [info("Can't read the Finder selection", "Allow Alfred to control Finder in System Settings → Privacy & Security → Automation", "error")];
+    if (files === null) return [info("Couldn’t read the Finder selection", "Allow Alfred to control Finder in System Settings → Privacy & Security → Automation", "error")];
     sessionFiles = files;
   }
   files = expandFolders([...new Set(files)]);

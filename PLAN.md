@@ -39,7 +39,7 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 - Only the first frame of an animated GIF/HEICS is used when the output format can't animate; only the first page of a multi-page file unless it stays TIFF.
 
 ## Verify in real Alfred
-- [ ] First run asks for Automation permission for Finder; the "Can't read the Finder selection" item appears when it is denied.
+- [ ] First run asks for Automation permission for Finder; the “Couldn’t read the Finder selection” item appears when it is denied.
 - [ ] Typing after the keyword doesn't query Finder again (`mt_sel` is passed back between keystrokes).
 - [ ] The Universal Action on 1 and on many files (tab-separated `{query}`), and on a folder.
 - [ ] <kbd>⌘</kbd><kbd>↩</kbd> reveals results; <kbd>⌘</kbd><kbd>Y</kbd>, <kbd>⌘</kbd><kbd>C</kbd>, <kbd>⌘</kbd><kbd>L</kbd> on an operation row.

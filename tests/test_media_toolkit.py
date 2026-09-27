@@ -221,7 +221,7 @@ class ScriptFilterTests(Base):
         self.assertTrue(ref.startswith("@" + CACHE), ref)
         e = base_env(mt_op="resize:pct:50", mt_files=ref)
         msg = subprocess.run(["./action.sh", "resize:pct:50"], cwd=SRC, env=e, capture_output=True, text=True).stdout
-        self.assertTrue(msg.startswith("Resized 1 file · 600 failed"), msg)
+        self.assertTrue(msg.startswith("Resized 1 file · Couldn’t resize 600 files"), msg)
         self.assertTrue(os.path.exists(self.p("real-edited.jpg")))
         # only lists written by the workflow are read
         with open(self.p("list.json"), "w") as f:
@@ -269,7 +269,7 @@ class ScriptFilterTests(Base):
     def test_encoders_detected_at_runtime(self):
         jpg = make(self.p("a.jpg"))
         it = items("img", "webp", [jpg], MT_TEST_HIDE_FORMATS="webp")
-        self.assertEqual(it[0]["title"], "This Mac can't write WebP images")
+        self.assertEqual(it[0]["title"], "This Mac can’t write WebP images")
         self.assertEqual(it[0]["valid"], False)
         titles = [i["title"] for i in items("img", "convert", [jpg], MT_TEST_HIDE_FORMATS="webp,avif")]
         self.assertNotIn("Convert image to AVIF", titles)
@@ -388,7 +388,7 @@ class ImageTests(Base):
     def test_no_subject_found(self):
         # NSUInteger counts come back as strings from the bridge: the empty-result check never fired
         src = make(self.p("plain.png"), "public.png", 300, 200, plain=True)
-        self.assertEqual(act("removebg", [src]), "Failed: plain.png: no subject found")
+        self.assertEqual(act("removebg", [src]), "Couldn’t process plain.png: no subject found")
         self.assertEqual(self.listdir(), ["plain.png"])
 
     def test_panorama_downscale_is_not_too_large(self):
@@ -492,10 +492,10 @@ class ImageTests(Base):
     def test_convert_optional_encoders(self):
         src = make(self.p("c.png"), "public.png", 64, 48)
         out = act("convert:avif", [src])
-        if "can't write" in out:
+        if "can’t write" in out:
             self.skipTest("this Mac can't encode AVIF")
         self.assertEqual(probe(self.p("c.avif"))["uti"], "public.avif")
-        self.assertIn("can't write WebP", act("convert:webp", [src], MT_TEST_HIDE_FORMATS="webp"))
+        self.assertIn("can’t write WebP", act("convert:webp", [src], MT_TEST_HIDE_FORMATS="webp"))
 
     def test_convert_oriented_jpeg_bakes_orientation(self):
         src = make(self.p("o.jpg"), w=300, h=200, orientation=6, quadrant="bl")
@@ -581,10 +581,10 @@ class ImageTests(Base):
             f.write("function run() { throw new Error('boom') }\n")
         e = base_env(mt_op="rotate:90", mt_files="[]")
         out = subprocess.run(["./action.sh", "rotate:90"], cwd=broken, env=e, capture_output=True, text=True).stdout.strip()
-        self.assertTrue(out.startswith("Media Toolkit failed: see "), out)
+        self.assertTrue(out.startswith("Media Toolkit couldn’t finish: see "), out)
         e = base_env(mt_op="mp4", mt_files="[]")
         out = subprocess.run(["./action.sh", "mp4"], cwd=broken, env=e, capture_output=True, text=True).stdout.strip()
-        self.assertTrue(out.startswith("Media Toolkit failed: see "), out)
+        self.assertTrue(out.startswith("Media Toolkit couldn’t finish: see "), out)
 
     def test_animated_gif(self):
         gif = make(self.p("anim.gif"), "com.compuserve.gif", 200, 100, frames=5, delay=0.3)
@@ -658,11 +658,11 @@ class ImageTests(Base):
             f.write("not an image")
         missing = self.p("missing.png")
         msg = act("resize:pct:50", [good, bad, missing], mt_reveal=1)
-        self.assertTrue(msg.startswith("Resized 1 file · 2 failed (bad.jpg: not a readable image"), msg)
+        self.assertTrue(msg.startswith("Resized 1 file · Couldn’t resize 2 files (bad.jpg: not a readable image"), msg)
         self.assertTrue(os.path.exists(self.p("good-edited.jpg")))
         with open(os.path.join(CACHE, "reveal.txt")) as f:
             self.assertEqual(f.read().split("\n"), [self.p("good-edited.jpg")])
-        self.assertEqual(act("rotate:90", [missing]), "Failed: missing.png: file not found")
+        self.assertEqual(act("rotate:90", [missing]), "Couldn’t rotate missing.png: file not found")
         self.assertEqual(act("rotate:90", []), "No files to process")
         # no stray temp files
         self.assertFalse([f for f in os.listdir(self.d) if f.startswith(".mt-")])
@@ -701,7 +701,7 @@ class ImageTests(Base):
         msg = act("rotate:90", [src], MT_TEST_HIDE_FORMATS="tiff")
         self.assertIn("saved as JPEG", msg)
         self.assertTrue(os.path.exists(self.p("w.jpg")))
-        self.assertIn("can't re-encode", act("optimize", [src], MT_TEST_HIDE_FORMATS="tiff"))
+        self.assertIn("can’t re-encode", act("optimize", [src], MT_TEST_HIDE_FORMATS="tiff"))
 
 
 # ---------------------------------------------------------------- video / audio
@@ -972,7 +972,7 @@ class AVConvertTests(Base):
         msg = self.run_op("m4a", [self.mov, wav])
         self.assertEqual(msg, "Queued 2 files")
         n = notifications()[-1]
-        self.assertTrue(n.startswith("1 converted, 1 failed · clip ü 'x'.mov: "), n)
+        self.assertTrue(n.startswith("1 converted, 1 couldn’t be converted · clip ü 'x'.mov: "), n)
         self.assertIn("no audio track", n)
         self.assertTrue(os.path.exists(self.p("tone.m4a")))
         self.assertFalse([f for f in os.listdir(self.d) if f.startswith(".mt-")])
@@ -1077,7 +1077,7 @@ class AuditImageTests(Base):
         # and big batches run in child processes of CHUNK files each
         files = [make(self.p(f"c{i}.png"), "public.png", 40, 20) for i in range(7)] + [self.p("missing.png")]
         msg = act("rotate:90", files, MT_TEST_CHUNK=3, mt_reveal=1)
-        self.assertEqual(msg, "Rotated 7 files · Failed: missing.png: file not found")
+        self.assertEqual(msg, "Rotated 7 files · Couldn’t rotate missing.png: file not found")
         self.assertEqual(len([f for f in self.listdir() if "-edited" in f]), 7)
         with open(os.path.join(CACHE, "reveal.txt")) as f:
             self.assertEqual(len(f.read().split("\n")), 7)
@@ -1164,7 +1164,7 @@ class AuditQueueTests(QueueTests):
         self.write_job(["/bin/sh", "-c", "echo 'Stream map '\\''0:a:0'\\'' matches no streams.' >&2; exit 1", "::then::",
                         "/bin/sh", "-c", 'echo x > "$0"', tmp])
         self.run_worker()
-        self.assertEqual(notifications()[-1], "Failed: fake ü.mov: no audio track")
+        self.assertEqual(notifications()[-1], "Couldn’t convert fake ü.mov: no audio track")
         self.assertFalse(os.path.exists(self.p("out-2.mov")))
 
     def test_jobs_queued_after_a_cancel_still_run(self):
@@ -1268,7 +1268,7 @@ class AuditEncoderTests(Base):
         for a in ("webm", "compress:28", "mp3"):
             self.assertNotIn(a, args)
         titles = [i["title"] for i in it]
-        self.assertIn("Convert to WebM (VP9): this ffmpeg can't encode it", titles)
+        self.assertIn("Convert to WebM (VP9): this ffmpeg can’t encode it", titles)
         self.assertIn("libvpx-vp9 or libopus", next(i for i in it if "WebM" in i["title"])["subtitle"])
         self.assertNotIn("Install ffmpeg with Homebrew", titles)
         # the macOS tools step in where they can: a movie to M4A via ffmpeg, MP3 isn't possible
@@ -1430,7 +1430,7 @@ class Round4Tests(Base):
         act("mp3", [wav], MT_TEST_FFMPEG=ff, MT_TEST_FFMPEG_ENCODERS="libmp3lame", MT_TEST_WORKER_FOREGROUND=1, **env)
         with open(os.path.join(CACHE, "notify.txt"), "rb") as f:
             n = f.read().decode("utf-8").strip()  # raises when not valid UTF-8
-        self.assertEqual(n, "Failed: tön.wav: xtön.wav: Invalid data found when processing input")
+        self.assertEqual(n, "Couldn’t convert tön.wav: xtön.wav: Invalid data found when processing input")
         for k in range(1, 4):  # every cut position inside a two-byte character
             self.assertEqual(subprocess.run(["bash", "-c", 'printf "%s" "$1" | cut -c1-' + str(2 * k + 1) + ' | iconv -c -f UTF-8 -t UTF-8 2>/dev/null', "_", "ü" * 9],
                                             capture_output=True, env={"PATH": "/usr/bin:/bin"}).stdout.decode().rstrip("\n"), "ü" * k)

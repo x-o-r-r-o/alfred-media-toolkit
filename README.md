@@ -1,6 +1,6 @@
 # <img src="src/icon.png" width="48" align="center"> Media Toolkit
 
-Resize, convert, rotate and clean images, remove backgrounds offline, and convert, compress or trim video and audio, right from the Finder selection. Images use only what ships with macOS; video and audio use ffmpeg when it's installed, and the tools built into macOS otherwise.
+Resize, convert, rotate and clean images, remove backgrounds offline, and convert, compress or trim video and audio, right from the Finder selection. Images use only what ships with macOS; video and audio use ffmpeg when it’s installed, and the tools built into macOS otherwise.
 
 ## Usage
 
@@ -30,7 +30,7 @@ Convert the video and audio files selected in Finder via the `vid` keyword: MP4 
 
 ![Converting a video](images/vid.png)
 
-Conversions run in the background, one file at a time, with a notification when they finish. <kbd>⌘</kbd><kbd>↩</kbd> and <kbd>⌥</kbd><kbd>↩</kbd> reveal or copy the results once they're done. While they run, the `vid` keyword shows the progress:
+Conversions run in the background, one file at a time, with a notification when they finish. <kbd>⌘</kbd><kbd>↩</kbd> and <kbd>⌥</kbd><kbd>↩</kbd> reveal or copy the results once they’re done. While they run, the `vid` keyword shows the progress:
 
 * <kbd>↩</kbd> Cancel the running conversion and the queue.
 * <kbd>⌘</kbd><kbd>↩</kbd> Reveal the conversion log in Finder.
@@ -39,7 +39,7 @@ Conversions run in the background, one file at a time, with a notification when 
 
 HEVC keeps HDR video in 10 bits. The other formats are 8-bit without tone mapping, so HDR clips can look washed out in some players.
 
-Without ffmpeg, MP4, HEVC, MOV, resizing, trimming and M4A work on QuickTime and MP4 files through macOS’s own `avconvert`, and audio converts to M4A, WAV, FLAC or AIFF through `afconvert`. The other formats offer to copy `brew install ffmpeg`. ffmpeg is found in Homebrew, MacPorts and Nix locations, or set its path in the Workflow’s Configuration; formats its build can't encode are pointed out.
+Without ffmpeg, MP4, HEVC, MOV, resizing, trimming and M4A work on QuickTime and MP4 files through macOS’s own `avconvert`, and audio converts to M4A, WAV, FLAC or AIFF through `afconvert`. The other formats offer to copy `brew install ffmpeg`. ffmpeg is found in Homebrew, MacPorts and Nix locations, or set its path in the Workflow’s Configuration; formats its build can’t encode are pointed out.
 
 Alternatively, act on any files via the Universal Action, or on the Finder selection via the `media` keyword: both show the image, video and audio operations that apply, and each operation only touches the files of its kind.
 
